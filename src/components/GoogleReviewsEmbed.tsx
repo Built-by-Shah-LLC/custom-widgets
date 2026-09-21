@@ -112,6 +112,7 @@ export function GoogleReviewsEmbed({
       config={config}
       business={business}
       reviews={reviews}
+      apiOrigin={apiOrigin}
     />
   );
 }

@@ -2,20 +2,32 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { reviewImageProxyUrl } from '@/lib/review-images';
 
-export function ReviewLightbox({ images, initialIndex, onClose }: {
+export function ReviewLightbox({ images, initialIndex, onClose, apiOrigin = '' }: {
   images: string[];
   initialIndex: number;
   onClose: () => void;
+  apiOrigin?: string;
 }) {
   const [index, setIndex] = useState(initialIndex);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [displaySrc, setDisplaySrc] = useState(images[initialIndex]);
+
+  const handleImageElement = useCallback((image: HTMLImageElement | null) => {
+    // Cached images can already be complete before the framework observes a
+    // load event. Clear the spinner from the element's actual state too.
+    if (image?.complete && image.naturalWidth > 0) setLoading(false);
+  }, []);
 
   const show = useCallback((nextIndex: number) => {
     if (nextIndex < 0 || nextIndex >= images.length) return;
     setLoading(true);
+    setFailed(false);
+    setDisplaySrc(images[nextIndex]);
     setIndex(nextIndex);
-  }, [images.length]);
+  }, [images]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -31,6 +43,7 @@ export function ReviewLightbox({ images, initialIndex, onClose }: {
     for (const nearbyIndex of [index - 1, index + 1]) {
       if (nearbyIndex >= 0 && nearbyIndex < images.length) {
         const preload = new Image();
+        preload.referrerPolicy = 'no-referrer';
         preload.src = images[nearbyIndex];
       }
     }
@@ -58,19 +71,36 @@ export function ReviewLightbox({ images, initialIndex, onClose }: {
         }}
       >
         {loading && <PhotoSpinner size={44} />}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          key={images[index]}
-          src={images[index]}
-          alt={`Review photo ${index + 1} of ${images.length}`}
-          onLoad={() => setLoading(false)}
-          onError={() => setLoading(false)}
-          style={{
-            display: 'block', maxWidth: '100%', maxHeight: 'calc(100dvh - 16px)', borderRadius: '8px',
-            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)', objectFit: 'contain',
-            opacity: loading ? 0 : 1, transition: 'opacity 150ms ease',
-          }}
-        />
+        {failed && (
+          <div style={{ color: '#fff', fontSize: '14px', padding: '24px' }}>
+            Photo unavailable
+          </div>
+        )}
+        {!failed && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            ref={handleImageElement}
+            key={displaySrc}
+            src={displaySrc}
+            alt={`Review photo ${index + 1} of ${images.length}`}
+            referrerPolicy="no-referrer"
+            onLoad={() => setLoading(false)}
+            onError={() => {
+              const fallback = reviewImageProxyUrl(images[index], apiOrigin);
+              if (displaySrc !== fallback) {
+                setDisplaySrc(fallback);
+                return;
+              }
+              setLoading(false);
+              setFailed(true);
+            }}
+            style={{
+              display: 'block', maxWidth: '100%', maxHeight: 'calc(100dvh - 16px)', borderRadius: '8px',
+              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)', objectFit: 'contain',
+              opacity: loading ? 0 : 1, transition: 'opacity 150ms ease',
+            }}
+          />
+        )}
         {index > 0 && (
           <LightboxButton label="Previous photo" side="left" onClick={() => show(index - 1)}>
             <path d="m15 18-6-6 6-6" />
@@ -95,13 +125,31 @@ export function ReviewLightbox({ images, initialIndex, onClose }: {
   );
 }
 
-export function ReviewPhoto({ src, size, borderRadius, onClick }: {
+export function ReviewPhoto({
+  src,
+  size,
+  borderRadius,
+  onClick,
+  apiOrigin = '',
+  loadingStrategy = 'lazy',
+}: {
   src: string;
   size: number;
   borderRadius: number;
   onClick: () => void;
+  apiOrigin?: string;
+  loadingStrategy?: 'eager' | 'lazy';
 }) {
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [displaySrc, setDisplaySrc] = useState(src);
+
+  const handleImageElement = useCallback((image: HTMLImageElement | null) => {
+    if (image?.complete && image.naturalWidth > 0) setLoading(false);
+  }, []);
+
+  if (failed) return null;
+
   return (
     <button type="button" onClick={onClick} aria-label="Open review photo" style={{
       position: 'relative', width: `${size}px`, height: `${size}px`, flexShrink: 0, padding: 0,
@@ -110,7 +158,15 @@ export function ReviewPhoto({ src, size, borderRadius, onClick }: {
     }}>
       {loading && <PhotoSpinner size={Math.min(28, Math.max(18, size * 0.35))} dark />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="" loading="lazy" decoding="async" onLoad={() => setLoading(false)} onError={() => setLoading(false)} style={{
+      <img ref={handleImageElement} src={displaySrc} alt="" loading={loadingStrategy} decoding="async" referrerPolicy="no-referrer" onLoad={() => setLoading(false)} onError={() => {
+        const fallback = reviewImageProxyUrl(src, apiOrigin);
+        if (displaySrc !== fallback) {
+          setDisplaySrc(fallback);
+          return;
+        }
+        setLoading(false);
+        setFailed(true);
+      }} style={{
         position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
         opacity: loading ? 0 : 1, transition: 'opacity 150ms ease',
       }} />

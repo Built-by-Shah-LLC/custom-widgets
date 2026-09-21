@@ -171,6 +171,7 @@ interface GoogleReviewsWidgetProps {
   business?: BusinessInfo;
   reviews?: Review[];
   preview?: boolean;
+  apiOrigin?: string;
 }
 
 export function GoogleReviewsWidget({
@@ -179,6 +180,7 @@ export function GoogleReviewsWidget({
   business,
   reviews,
   preview = false,
+  apiOrigin = '',
 }: GoogleReviewsWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hover, setHover] = useState(false);
@@ -312,6 +314,7 @@ export function GoogleReviewsWidget({
           config={config}
           business={businessInfo}
           reviews={reviews}
+          apiOrigin={apiOrigin}
         />
       )}
     </>

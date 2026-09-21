@@ -104,6 +104,7 @@ export function GoogleReviewsCarouselEmbed({
       config={config}
       business={business}
       reviews={reviews}
+      apiOrigin={apiOrigin}
     />
   );
 }

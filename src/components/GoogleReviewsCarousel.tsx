@@ -43,12 +43,14 @@ export function GoogleReviewsCarousel({
   business,
   reviews = [],
   disableResponsive = false,
+  apiOrigin = '',
 }: {
   config: WidgetConfig;
   business?: BusinessInfo;
   reviews?: Review[];
   /** Skip the per-slide breakpoints — previews always show the configured count. */
   disableResponsive?: boolean;
+  apiOrigin?: string;
 }) {
   const [page, setPage] = useState(0);
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
@@ -159,7 +161,7 @@ export function GoogleReviewsCarousel({
     flexShrink: 0,
   };
 
-  const renderCard = (review: Review) => (
+  const renderCard = (review: Review, loadImagesEagerly: boolean) => (
     <div key={review.id} style={cardStyle}>
       {/* Author */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -260,11 +262,13 @@ export function GoogleReviewsCarousel({
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {review.images!.map((src, i) => (
             <ReviewPhoto
-              key={i}
+              key={`${src}-${i}`}
               src={googlePhotoVariant(src, avatarSize * 2)}
               size={avatarSize}
               borderRadius={6}
               onClick={() => setLightbox({ images: review.images!, index: i })}
+              apiOrigin={apiOrigin}
+              loadingStrategy={loadImagesEagerly ? 'eager' : 'lazy'}
             />
           ))}
         </div>
@@ -316,7 +320,7 @@ export function GoogleReviewsCarousel({
         .cw-carousel-text::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.3); border-radius: 9999px; }
       `}</style>
 
-      {lightbox && <ReviewLightbox images={lightbox.images} initialIndex={lightbox.index} onClose={() => setLightbox(null)} />}
+      {lightbox && <ReviewLightbox images={lightbox.images} initialIndex={lightbox.index} onClose={() => setLightbox(null)} apiOrigin={apiOrigin} />}
 
       {/* Header */}
       {(config.drawerShowBusinessInfo || config.carouselShowOverallRating) && business && (
@@ -399,7 +403,7 @@ export function GoogleReviewsCarousel({
                 boxSizing: 'border-box',
               }}
             >
-              {pageReviews.map(renderCard)}
+              {pageReviews.map((review) => renderCard(review, i === currentPage))}
             </div>
           ))}
         </div>

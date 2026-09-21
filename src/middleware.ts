@@ -34,6 +34,7 @@ function isPublicEmbedDataApi(pathname: string, method: string): boolean {
   if (m !== 'GET' && m !== 'OPTIONS' && m !== 'HEAD') return false;
 
   return (
+    pathname === '/api/v1/review-images' ||
     /^\/api\/v1\/widgets\/[^/]+$/.test(pathname) ||
     /^\/api\/v1\/widgets\/[^/]+\/reviews$/.test(pathname) ||
     /^\/api\/v1\/before-after-widgets\/[^/]+$/.test(pathname) ||
