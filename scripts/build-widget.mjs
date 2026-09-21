@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
 const publicDir = path.resolve(__dirname, '../public');
 const bundlePath = path.join(publicDir, 'widget.js');
+const manifestPath = path.join(publicDir, 'widget-manifest.json');
 
 // NOTE: The bundle is served to client sites only via the stable route
 // /api/embeds/widget.js. Hashed widget.<hash>.js copies were removed because
@@ -56,11 +57,24 @@ const buildOptions = {
   },
 };
 
+async function writeStableManifest() {
+  // Keep the historical manifest useful without publishing a build hash that
+  // becomes stale after the next deployment. Consumers resolve the stable
+  // route, which is covered by the same beforeFiles aliases as old snippets.
+  await fs.writeFile(
+    manifestPath,
+    `${JSON.stringify({ file: 'widget.js' })}\n`,
+    'utf8'
+  );
+}
+
 if (watch) {
+  await writeStableManifest();
   const ctx = await esbuild.context(buildOptions);
   await ctx.watch();
   console.log('[custom-widgets] Watching for widget changes...');
 } else {
   await esbuild.build(buildOptions);
+  await writeStableManifest();
   console.log('[custom-widgets] Widget bundle written to public/widget.js');
 }

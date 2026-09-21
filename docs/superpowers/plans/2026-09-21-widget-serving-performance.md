@@ -1,10 +1,21 @@
 # Widget serving performance and next-load freshness
 
-Status: Kimi K3's focused second review found no remaining plan-level blockers. Ready for user review and the subsequent safety-guard/loader implementation. Long data caching remains subject to the explicit Phase 0 decision below. Implementation and production actions are not started.
+Status: Selected implementation complete on this branch, produced by Luna at maximum reasoning effort with Astra and Kimi K3 CLI supervision. Local validation passed within the limits in the handoff. The user requires Vercel Hobby. Mutable data remains uncached; long-lived data caching and publication infrastructure remain unfinished. Vercel preview/release verification is pending. No production actions have been performed.
 Date: 2026-09-21
 Planning branch: `codex/widget-serving-plan`
 Source baseline: `36f5d0b` on `main`
 Reviewer requested: Kimi K3, run through the locally installed CLI.
+Implementation result: [complete file-by-file handoff](../reviews/2026-09-21-widget-serving-handoff.md) and [supervisor reviews](../reviews/2026-09-21-widget-serving-implementation-review.md).
+
+## Implementation decision — Vercel Hobby, 2026-09-21
+
+The user authorized implementation and added a requirement to remain on Vercel's free plan. Vercel's [current cron limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) allow Hobby jobs only once per day, with an invocation window of up to an hour. The proposed prompt publication-retry worker therefore cannot depend on frequent Vercel cron. Cache purging itself is [available on all plans](https://vercel.com/docs/caching/cdn-cache/purge); its cost is not the correctness blocker.
+
+Astra's review selected the safe outcome already permitted by Phase 0: implement immediate per-widget loading, canonical public payloads, one snapshot per visit, shared-renderer CDN caching, legacy aliases and test isolation. Mutable bootstrap and legacy JSON responses use explicit browser/CDN no-store policies, and domain admission uses a fresh database read. No paid service, new database schema, cron, durable queue, pending-publication state, or new customer URL is needed for this transport. Saves and maintenance writes remain ordinary database commits; subsequent successful origin reads see the committed state without a separate publication step. Independently committed review-sync operations are not a new cross-table atomic snapshot guarantee.
+
+Long-lived **data** caching is still unfinished. No isolated provider deployment is configured here to demonstrate purge propagation, old in-flight fills, domain variants, promotion and rollback. The immutable-snapshot alternative also lacks its required admission-order and performance evidence. Neither unverified design is enabled behind a casual switch. The one-hour data TTL, publication schema/worker, associated UI states and retry targets below remain conditional future work, not claims about this implementation. Removing the old data TTL may increase warm data TTFB and origin invocations; measure that tradeoff separately from reduced bytes, duplicate requests and host-DOM waiting. This change does not promise a measured production speedup before deployment evidence exists.
+
+For release, verify the shared renderer's CDN HIT behavior, no-store data behavior, normal reload after isolated mutations, domain changes, and serving aliases on a Vercel preview. Account for prior cached responses and test a compatible rollback. Local fixtures establish loader behavior and request counts; they cannot prove provider behavior or production latency.
 
 ## 1. Agreed outcome and boundaries
 
@@ -14,7 +25,7 @@ The user confirmed that edits only need to appear on the **next page load**. An 
 
 “Saved and published” means the database write and the required cache publication have completed. A normal new load following that acknowledgement must receive that revision or a later revision without requiring a hard refresh. Concurrent loads that began before acknowledgement may finish with the previous revision. If publication is pending or fails after a successful database write, the UI must distinguish this from both an unsaved change and successful publication.
 
-This branch initially contains only this plan and review evidence. Future implementation is divided into independently reviewable phases below. No deployment, live database migration, review synchronization, cache purge, or customer-site edit is authorized by drafting this plan.
+This branch began with this plan and review evidence, then received the implementation selected in the Hobby decision above. The original phased design remains below for traceability; conditional caching/publication sections are future work, not implemented behavior. Implementation authorization does not perform a deployment, live database migration, review synchronization, cache purge, or customer-site edit.
 
 ## 2. Evidence and what it does not prove
 

@@ -38,6 +38,8 @@ interface FormWidgetProps {
   compact?: boolean;
   widgetId?: string;
   apiOrigin?: string;
+  /** Server-issued schema fingerprint for open-form stale-schema detection. */
+  schemaFingerprint?: string;
 }
 
 /**
@@ -51,6 +53,7 @@ export function FormWidget({
   compact = false,
   widgetId,
   apiOrigin = '',
+  schemaFingerprint,
 }: FormWidgetProps) {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -150,6 +153,7 @@ export function FormWidget({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             answers,
+            ...(schemaFingerprint ? { schemaFingerprint } : {}),
             meta: {
               honeypot,
               referrer: document.referrer || '',
@@ -159,13 +163,29 @@ export function FormWidget({
         }
       );
       if (!res.ok) {
+        const responseBody = (await res.json().catch(() => null)) as
+          | { error?: string; message?: string }
+          | null;
+        if (
+          responseBody?.error === 'FORM_SCHEMA_CHANGED' ||
+          responseBody?.message?.toLowerCase().includes('form changed')
+        ) {
+          throw new Error(
+            responseBody.message ||
+              'This form changed while it was open. Please reload and try again.'
+          );
+        }
         throw new Error(`HTTP ${res.status}`);
       }
       setStatus('success');
     } catch (err) {
       console.warn(`[custom-widgets] Submit failed for ${widgetId}:`, err);
       setStatus('error');
-      setErrorMsg(config.errorMessage || 'Something went wrong. Please try again.');
+      setErrorMsg(
+        err instanceof Error && err.message.includes('form changed')
+          ? err.message
+          : config.errorMessage || 'Something went wrong. Please try again.'
+      );
     }
   };
 

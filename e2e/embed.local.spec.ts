@@ -7,8 +7,8 @@ import {
 
 test.describe('local embed harness', () => {
   test.skip(
-    !process.env.SUPABASE_SERVICE_ROLE_KEY,
-    'SUPABASE_SERVICE_ROLE_KEY required for local embed E2E'
+    !process.env.E2E_SUPABASE_SERVICE_ROLE_KEY,
+    'Dedicated E2E_SUPABASE_SERVICE_ROLE_KEY required for local embed E2E'
   );
 
   test('badge, carousel, and before/after widgets mount and render', async ({

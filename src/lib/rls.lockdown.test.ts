@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
+import { isExplicitlyAllowlistedSupabaseUrl } from './e2e-environment-guard';
 
 /**
  * Confirms migration 014 lockdown: anon key cannot read application tables.
  * Skips when Supabase env is not present (CI without secrets).
  */
 describe('RLS lockdown (anon)', () => {
-  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  const url = process.env.E2E_SUPABASE_URL;
+  const anon = process.env.E2E_SUPABASE_ANON_KEY;
+  const safeIsolatedTarget =
+    process.env.E2E_RLS_CHECK === 'true' &&
+    Boolean(url && anon) &&
+    isExplicitlyAllowlistedSupabaseUrl(process.env);
 
-  it.skipIf(!url || !anon)('anon cannot SELECT widgets / reviews / businesses', async () => {
+  it.skipIf(!safeIsolatedTarget)('anon cannot SELECT widgets / reviews / businesses', async () => {
     const client = createClient(url!, anon!);
 
     for (const table of [

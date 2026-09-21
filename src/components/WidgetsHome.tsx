@@ -96,13 +96,10 @@ function buildEmbedCode(id: string) {
   return [
     '<!-- BuiltByShah Widget Embed -->',
     `<div data-bbs-embed="${id}"></div>`,
-    // data.js is intentionally a classic blocking script: it runs during
-    // parse so the bootstrap payload exists before the async widget.js
-    // bundle executes — that's what makes the first paint skip the skeleton
-    // (see spec amendment 6).
-    `<script src="${window.location.origin}/api/embeds/widget/${id}/data.js"></script>`,
-    // Always use the stable bundle URL. Hashed widget.<hash>.js URLs break
-    // (404) on client sites every time a new deployment replaces the build.
+    // Both scripts are async classic scripts. The runtime coordinates either
+    // execution order and mounts each placeholder as soon as its own data and
+    // renderer are ready; the stable URLs survive future deployments.
+    `<script async src="${window.location.origin}/api/embeds/widget/${id}/data.js"></script>`,
     `<script async src="${window.location.origin}/api/embeds/widget.js"></script>`,
     '<!-- End BuiltByShah Widget Embed -->',
   ].join('\n');

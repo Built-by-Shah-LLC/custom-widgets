@@ -4,8 +4,16 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { reportCritical } from '@/lib/alerts';
+import {
+  NO_STORE_HEADERS,
+  WIDGET_SCRIPT_CACHE_HEADERS,
+} from '@/lib/cache-headers';
 
 const WIDGET_JS_PATH = path.join(process.cwd(), 'public', 'widget.js');
+
+// The renderer file is deployment output; keep Next's route layer from
+// snapshotting it while the Vercel CDN follows the explicit response headers.
+export const dynamic = 'force-dynamic';
 
 // Cache the file content and ETag in memory so we don't re-read the disk on
 // every request. The bundle only changes on deploy, so this is safe.
@@ -36,10 +44,10 @@ export async function GET(request: Request) {
       return new NextResponse(null, {
         status: 304,
         headers: {
+          ...WIDGET_SCRIPT_CACHE_HEADERS,
           'Access-Control-Allow-Origin': '*',
-          // Legacy snippets use this stable URL, so it must revalidate rather
-          // than claiming an immutable response that can never be replaced.
-          'Cache-Control': 'public, max-age=0, must-revalidate',
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
           ETag: etag,
         },
       });
@@ -47,9 +55,9 @@ export async function GET(request: Request) {
 
     return new NextResponse(new Uint8Array(content), {
       headers: {
+        ...WIDGET_SCRIPT_CACHE_HEADERS,
         'Content-Type': 'application/javascript; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=0, must-revalidate',
         'Content-Length': String(content.length),
         ETag: etag,
       },
@@ -61,6 +69,9 @@ export async function GET(request: Request) {
       fingerprint: 'embed-bundle-unavailable',
       meta: { path: WIDGET_JS_PATH },
     });
-    return NextResponse.json({ error: 'Embed bundle unavailable' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Embed bundle unavailable' },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
   }
 }

@@ -13,6 +13,8 @@
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "vitest run",
     "test:e2e": "playwright test --project=local",
+    "test:e2e:loader": "npm run build:widget && playwright test --project=loader",
+    "test:e2e:mutations": "E2E_RUN_MUTATIONS=true playwright test --project=mutation",
     "test:e2e:canary": "E2E_SKIP_WEBSERVER=1 playwright test --project=canary",
     "test:e2e:all": "npm run test:e2e && npm run test:e2e:canary"
   },
