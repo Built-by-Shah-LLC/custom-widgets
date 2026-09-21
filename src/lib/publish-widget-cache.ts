@@ -1,0 +1,126 @@
+import { dangerouslyDeleteByTag } from '@vercel/functions';
+import { widgetCacheTag } from './cache-headers';
+import { laggingCache, type LiveCacheResult } from './live-cache-warning';
+
+const WARM_RETRY_DELAY_MS = 400;
+const WARM_TIMEOUT_MS = 8_000;
+
+type DeleteByTag = (
+  tag: string | string[],
+  options?: { revalidationDeadlineSeconds?: number }
+) => Promise<unknown>;
+
+export interface PublishWidgetCacheDeps {
+  deleteByTag?: DeleteByTag;
+  fetch?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function dataJsUrl(widgetHost: string, widgetId: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(widgetHost);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  return `${url.origin}/api/embeds/widget/${encodeURIComponent(widgetId)}/data.js`;
+}
+
+function cacheFill(response: Response): 'stored' | 'hit' | 'unknown' {
+  const value = response.headers.get('x-vercel-cache')?.trim().toUpperCase() ?? '';
+  if (value === 'MISS' || value === 'REVALIDATED') return 'stored';
+  if (value === 'HIT') return 'hit';
+  return 'unknown';
+}
+
+async function deleteTags(tags: string[], deleteByTag: DeleteByTag): Promise<boolean> {
+  const options = { revalidationDeadlineSeconds: 0 };
+  try {
+    await deleteByTag(tags, options);
+    return true;
+  } catch {
+    try {
+      await deleteByTag(tags, options);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function requestData(url: string, fetchImpl: typeof fetch): Promise<Response> {
+  return fetchImpl(url, {
+    method: 'GET',
+    redirect: 'manual',
+    // Skip Next's data cache. The CDN decision is the data.js response headers.
+    cache: 'no-store',
+    signal: AbortSignal.timeout(WARM_TIMEOUT_MS),
+  });
+}
+
+async function warmWidget(
+  widgetHost: string,
+  widgetId: string,
+  fetchImpl: typeof fetch,
+  sleep: (ms: number) => Promise<void>
+): Promise<boolean> {
+  const url = dataJsUrl(widgetHost, widgetId);
+  if (!url) return false;
+
+  let first: Response;
+  try {
+    first = await requestData(url, fetchImpl);
+  } catch {
+    return false;
+  }
+
+  const fill = cacheFill(first);
+  if (fill === 'stored') return true;
+  if (fill !== 'hit') return false;
+
+  await sleep(WARM_RETRY_DELAY_MS);
+  try {
+    const second = await requestData(url, fetchImpl);
+    return cacheFill(second) === 'stored';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hard-deletes widget-<id> in every Vercel region, then GETs data.js once so
+ * the region running this function (Washington / iad1 on Hobby) stores the
+ * new body. Other regions fill on their first real visitor. widget.js is not
+ * tagged and is not requested here.
+ */
+export async function publishWidgetCache(
+  widgetIds: string[],
+  widgetHost: string,
+  deps: PublishWidgetCacheDeps = {}
+): Promise<LiveCacheResult> {
+  const tags = [
+    ...new Set(
+      widgetIds
+        .map((id) => widgetCacheTag(id))
+        .filter((tag): tag is string => Boolean(tag))
+    ),
+  ];
+  if (tags.length === 0) return { fresh: true };
+
+  const deleteByTag =
+    deps.deleteByTag ?? (process.env.VERCEL === '1' ? dangerouslyDeleteByTag : null);
+  if (!deleteByTag) return { fresh: true };
+
+  const deleted = await deleteTags(tags, deleteByTag);
+  if (!deleted) return laggingCache();
+
+  const fetchImpl = deps.fetch ?? fetch;
+  const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const ids = tags.map((tag) => tag.slice('widget-'.length));
+  const warmed = await Promise.all(
+    ids.map((id) => warmWidget(widgetHost, id, fetchImpl, sleep))
+  );
+  if (warmed.some((ok) => !ok)) return laggingCache();
+  return { fresh: true };
+}

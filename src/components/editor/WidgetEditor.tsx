@@ -10,6 +10,8 @@ import { EditorShell, type EditorTabDef, type EditorTabMeta } from './EditorShel
 import { ContentTab, LayoutTab, SettingsTab, StyleTab } from './tabs';
 import type { BusinessOption } from './tabs';
 import { reviewSyncStatus, type ReviewLoadStatus } from './review-sync-status';
+import { liveCacheWarningFromText, liveCacheWarningOf } from '@/lib/live-cache-warning';
+import { showToast } from '@/components/ui/Toast';
 
 export interface EditorWidget {
   widgetId: string;
@@ -138,9 +140,12 @@ export function WidgetEditor({
           ...configToDbRow(config),
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
+      const warning = liveCacheWarningFromText(raw);
+      if (warning) showToast(warning, 'warning', 8000);
       if (isNew) {
-        const row = await res.json();
+        const row = JSON.parse(raw) as { id: string };
         router.replace(`/widgets/google-reviews?id=${row.id}`);
         return;
       }
@@ -183,6 +188,8 @@ export function WidgetEditor({
         if (!response.ok) {
           throw new Error(result.message ?? result.error ?? 'Review fetch failed');
         }
+        const syncWarning = liveCacheWarningOf(result);
+        if (syncWarning) showToast(syncWarning, 'warning', 8000);
 
         const refreshedReviews = (result.reviews ?? []) as Review[];
         setSelectedReviews(refreshedReviews);
@@ -219,6 +226,8 @@ export function WidgetEditor({
           });
           const business = await response.json();
           if (!response.ok) throw new Error(business.message ?? business.error ?? 'Could not select business');
+          const businessWarning = liveCacheWarningOf(business);
+          if (businessWarning) showToast(businessWarning, 'warning', 8000);
           const reviews = business.reviews ?? [];
           setNewBusiness({ id: business.id, placeId: business.placeId, name: business.name, address: business.address, averageRating: business.averageRating, totalReviews: business.totalReviews });
           setSelectedReviews(reviews);

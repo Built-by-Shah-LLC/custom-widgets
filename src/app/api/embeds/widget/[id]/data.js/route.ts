@@ -13,17 +13,16 @@ import {
   buildReviewsPayload,
   safeJsString,
 } from '@/lib/widget-public-payload';
-import { NO_STORE_HEADERS, WIDGET_DATA_CACHE_HEADERS } from '@/lib/cache-headers';
+import { WIDGET_NO_STORE_HEADERS, publicWidgetDataHeaders } from '@/lib/cache-headers';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VARY_HEADERS = { Vary: 'Origin, Referer' };
 
-// Mutable widget data is intentionally uncached at the application layer;
-// only the shared renderer has a Vercel CDN lifetime.
+// The function still runs on a cache miss. Successful bodies are stored on
+// Vercel for 24h under widget-<id>. Errors stay no-store.
 export const dynamic = 'force-dynamic';
 
 function noStoreHeaders(extra: Record<string, string> = {}) {
-  return { ...NO_STORE_HEADERS, ...VARY_HEADERS, ...extra };
+  return { ...WIDGET_NO_STORE_HEADERS, ...extra };
 }
 
 function unavailableResponse() {
@@ -139,8 +138,9 @@ export async function GET(
 
   return new NextResponse(body, {
     headers: {
-      ...WIDGET_DATA_CACHE_HEADERS,
-      ...VARY_HEADERS,
+      // No Vary: the body is identical for every dealer, and ACAO is *.
+      // One Washington GET after a save fills this URL for every site on that edge.
+      ...publicWidgetDataHeaders(id),
       'Content-Type': 'application/javascript; charset=utf-8',
       'X-Content-Type-Options': 'nosniff',
       'Access-Control-Allow-Origin': '*',

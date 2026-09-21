@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
 import { normalizeDomain } from '@/lib/domain-utils';
 import { requireAdmin } from '@/lib/require-admin';
+import { jsonSaved, publishAllEmbedWidgets } from '@/lib/widget-publication';
+
+export const maxDuration = 60;
 
 export const dynamic = 'force-dynamic';
 
@@ -62,5 +65,5 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(data, { status: 201 });
+  return jsonSaved(data, await publishAllEmbedWidgets(request), 201);
 }

@@ -10,6 +10,8 @@ import { EditorShell, type EditorTabDef, type EditorTabMeta } from './EditorShel
 import { ContentTab, LayoutTab, SettingsTab, StyleTab } from './carousel-tabs';
 import type { BusinessOption } from './tabs';
 import { reviewSyncStatus, type ReviewLoadStatus } from './review-sync-status';
+import { liveCacheWarningFromText, liveCacheWarningOf } from '@/lib/live-cache-warning';
+import { showToast } from '@/components/ui/Toast';
 
 export interface CarouselEditorWidget {
   widgetId: string;
@@ -154,9 +156,12 @@ export function CarouselEditor({
           ...configToDbRow(config),
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
+      const warning = liveCacheWarningFromText(raw);
+      if (warning) showToast(warning, 'warning', 8000);
       if (isNew) {
-        const row = await res.json();
+        const row = JSON.parse(raw) as { id: string };
         router.replace(`/widgets/google-reviews-carousel?id=${row.id}`);
         return;
       }
@@ -198,6 +203,8 @@ export function CarouselEditor({
         if (!response.ok) {
           throw new Error(result.message ?? result.error ?? 'Review fetch failed');
         }
+        const syncWarning = liveCacheWarningOf(result);
+        if (syncWarning) showToast(syncWarning, 'warning', 8000);
 
         const refreshedReviews = (result.reviews ?? []) as Review[];
         setLoadedReviews((current) => ({ ...current, [businessId]: refreshedReviews }));
@@ -235,6 +242,8 @@ export function CarouselEditor({
           });
           const savedBusiness = await response.json();
           if (!response.ok) throw new Error(savedBusiness.message ?? savedBusiness.error ?? 'Could not select business');
+          const businessWarning = liveCacheWarningOf(savedBusiness);
+          if (businessWarning) showToast(businessWarning, 'warning', 8000);
           id = savedBusiness.id;
           const reviews = savedBusiness.reviews ?? [];
           setAddedBusinesses((current) => [{ id, placeId: savedBusiness.placeId, name: savedBusiness.name, address: savedBusiness.address, averageRating: savedBusiness.averageRating, totalReviews: savedBusiness.totalReviews }, ...current.filter((b) => b.id !== id && b.id !== option.id)]);

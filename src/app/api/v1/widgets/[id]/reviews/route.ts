@@ -1,39 +1,18 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
-import {
-  AllowedDomainsUnavailableError,
-  getAllowedDomains,
-  getWidgetCorsHeaders,
-} from '@/lib/domain-utils';
-import {
-  WIDGET_NO_STORE_HEADERS,
-  WIDGET_DATA_CACHE_HEADERS,
-} from '@/lib/cache-headers';
+import { cachedPublicJsonHeaders } from '@/lib/cache-headers';
 import { mapReviewRow } from '@/lib/widget-mappers';
+import {
+  publicWidgetNotFound,
+  publicWidgetPreflight,
+  publicWidgetReadAccess,
+  publicWidgetUnavailable,
+} from '@/lib/public-widget-access';
 
 export const dynamic = 'force-dynamic';
 
-export async function OPTIONS(request: Request) {
-  let allowedDomains: string[];
-  try {
-    allowedDomains = await getAllowedDomains();
-  } catch (error) {
-    if (error instanceof AllowedDomainsUnavailableError) {
-      return NextResponse.json(
-        { error: 'Widget access policy unavailable' },
-        { status: 503, headers: WIDGET_NO_STORE_HEADERS }
-      );
-    }
-    throw error;
-  }
-  const cors = getWidgetCorsHeaders(request, allowedDomains);
-
-  return new NextResponse(null, {
-    status: cors.allowed ? 204 : 403,
-    headers: cors.allowed
-      ? { ...cors.headers, ...WIDGET_NO_STORE_HEADERS }
-      : { ...cors.headers, ...WIDGET_NO_STORE_HEADERS },
-  });
+export function OPTIONS(request: Request) {
+  return publicWidgetPreflight(request);
 }
 
 export async function GET(
@@ -41,26 +20,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  let allowedDomains: string[];
-  try {
-    allowedDomains = await getAllowedDomains();
-  } catch (error) {
-    if (error instanceof AllowedDomainsUnavailableError) {
-      return NextResponse.json(
-        { error: 'Widget access policy unavailable' },
-        { status: 503, headers: WIDGET_NO_STORE_HEADERS }
-      );
-    }
-    throw error;
-  }
-  const cors = getWidgetCorsHeaders(request, allowedDomains);
-
-  if (!cors.allowed) {
-    return NextResponse.json(
-      { error: 'Origin not allowed' },
-      { status: 403, headers: { ...cors.headers, ...WIDGET_NO_STORE_HEADERS } }
-    );
-  }
+  const access = await publicWidgetReadAccess(request);
+  if (!access.ok) return access.response;
 
   const { data, error } = await supabase
     .from('widgets')
@@ -68,18 +29,8 @@ export async function GET(
     .eq('id', id)
     .maybeSingle();
 
-  if (error) {
-    return NextResponse.json(
-      { error: 'Widget data unavailable' },
-      { status: 503, headers: { ...cors.headers, ...WIDGET_NO_STORE_HEADERS } }
-    );
-  }
-  if (!data) {
-    return NextResponse.json(
-      { error: 'Widget not found' },
-      { status: 404, headers: { ...cors.headers, ...WIDGET_NO_STORE_HEADERS } }
-    );
-  }
+  if (error) return publicWidgetUnavailable(access.corsHeaders);
+  if (!data) return publicWidgetNotFound(access.corsHeaders);
 
   return NextResponse.json(
     {
@@ -87,6 +38,6 @@ export async function GET(
         ? data.cached_reviews.map(mapReviewRow)
         : [],
     },
-    { headers: { ...cors.headers, ...WIDGET_DATA_CACHE_HEADERS } }
+    { headers: cachedPublicJsonHeaders(access.corsHeaders, id) }
   );
 }

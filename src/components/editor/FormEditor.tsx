@@ -17,6 +17,8 @@ import {
 import { FormWidget } from '@/components/FormWidget';
 import { EditorShell, type EditorTabDef, type EditorTabMeta } from './EditorShell';
 import { ContentTab, SettingsTab, StepsTab, StyleTab } from './form-tabs';
+import { liveCacheWarningFromText } from '@/lib/live-cache-warning';
+import { showToast } from '@/components/ui/Toast';
 
 export interface FormEditorWidget {
   widgetId: string;
@@ -288,7 +290,10 @@ export function FormEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: widgetName, ...formToDbRow(config) }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
+      const warning = liveCacheWarningFromText(raw);
+      if (warning) showToast(warning, 'warning', 8000);
       setSaved(true);
     } catch (err) {
       alert(`Save failed: ${err instanceof Error ? err.message : 'unknown error'}`);

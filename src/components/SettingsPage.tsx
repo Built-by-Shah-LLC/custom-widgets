@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { Button, Card, CardDescription, CardHeader, CardTitle, Input } from '@/components/ui';
 import { showConfirm } from '@/components/ui/ConfirmDialog';
-import { showToast } from '@/components/ui/Toast';
+import { showSaveResult, showToast } from '@/components/ui/Toast';
 
 interface AllowedDomain {
   id: string;
@@ -45,9 +45,10 @@ export function SettingsPage({ initialDomains }: SettingsPageProps) {
         return;
       }
 
-      setDomains((prev) => [...prev, data]);
+      const { liveCacheWarning: _ignored, ...domain } = data;
+      setDomains((prev) => [...prev, domain]);
       setInput('');
-      showToast('Domain added', 'success');
+      showSaveResult(data, 'Domain added');
     } catch {
       showToast('Failed to add domain', 'error');
     } finally {
@@ -82,10 +83,11 @@ export function SettingsPage({ initialDomains }: SettingsPageProps) {
         return;
       }
 
-      setDomains((prev) => prev.map((d) => (d.id === id ? data : d)));
+      const { liveCacheWarning: _ignored, ...domain } = data;
+      setDomains((prev) => prev.map((d) => (d.id === id ? domain : d)));
       setEditingId(null);
       setEditValue('');
-      showToast('Domain updated', 'success');
+      showSaveResult(data, 'Domain updated');
     } catch {
       showToast('Failed to update domain', 'error');
     } finally {
@@ -102,14 +104,14 @@ export function SettingsPage({ initialDomains }: SettingsPageProps) {
         method: 'DELETE',
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         showToast(data.error || 'Failed to delete domain', 'error');
         return;
       }
 
       setDomains((prev) => prev.filter((d) => d.id !== id));
-      showToast('Domain deleted', 'success');
+      showSaveResult(data, 'Domain deleted');
     } catch {
       showToast('Failed to delete domain', 'error');
     } finally {

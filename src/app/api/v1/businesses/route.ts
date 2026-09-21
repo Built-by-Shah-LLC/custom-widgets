@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/require-admin';
 import { supabase } from '@/lib/db';
 import { mapReviewRow } from '@/lib/widget-mappers';
+import { listReviewWidgetIdsForBusiness } from '@/lib/embed-widget-ids';
+import { laggingCache, type LiveCacheResult } from '@/lib/live-cache-warning';
+import { jsonSaved, publishEmbedWidgets } from '@/lib/widget-publication';
+
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const auth = await requireAdmin();
@@ -47,7 +52,17 @@ export async function POST(request: Request) {
     .single();
   const business = refreshedBusiness ?? data;
 
-  return NextResponse.json({
+  let cache: LiveCacheResult;
+  try {
+    cache = await publishEmbedWidgets(
+      request,
+      await listReviewWidgetIdsForBusiness(business.id)
+    );
+  } catch {
+    cache = laggingCache();
+  }
+
+  return jsonSaved({
     id: business.id,
     placeId: business.place_id,
     dataId: business.scrapedo_data_id,
@@ -57,5 +72,5 @@ export async function POST(request: Request) {
     totalReviews: business.total_reviews,
     reviews: (reviewRows ?? []).map(mapReviewRow),
     hasReviews: (reviewRows?.length ?? 0) > 0,
-  });
+  }, cache);
 }

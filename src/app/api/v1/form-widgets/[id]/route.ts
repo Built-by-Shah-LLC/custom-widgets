@@ -1,40 +1,21 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
-import {
-  AllowedDomainsUnavailableError,
-  getAllowedDomains,
-  getWidgetCorsHeaders,
-} from '@/lib/domain-utils';
-import {
-  WIDGET_NO_STORE_HEADERS,
-  WIDGET_DATA_CACHE_HEADERS,
-} from '@/lib/cache-headers';
+import { NO_STORE_HEADERS, cachedPublicJsonHeaders } from '@/lib/cache-headers';
 import { publicFormResponse } from '@/lib/widget-public-payload';
 import { requireAdmin } from '@/lib/require-admin';
+import {
+  publicWidgetNotFound,
+  publicWidgetPreflight,
+  publicWidgetReadAccess,
+  publicWidgetUnavailable,
+} from '@/lib/public-widget-access';
+import { deletedResponse, jsonSaved, publishEmbedWidgets } from '@/lib/widget-publication';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
-export async function OPTIONS(request: Request) {
-  let allowedDomains: string[];
-  try {
-    allowedDomains = await getAllowedDomains();
-  } catch (error) {
-    if (error instanceof AllowedDomainsUnavailableError) {
-      return NextResponse.json(
-        { error: 'Widget access policy unavailable' },
-        { status: 503, headers: WIDGET_NO_STORE_HEADERS }
-      );
-    }
-    throw error;
-  }
-  const cors = getWidgetCorsHeaders(request, allowedDomains);
-
-  return new NextResponse(null, {
-    status: cors.allowed ? 204 : 403,
-    headers: cors.allowed
-      ? { ...cors.headers, ...WIDGET_NO_STORE_HEADERS }
-      : { ...cors.headers, ...WIDGET_NO_STORE_HEADERS },
-  });
+export function OPTIONS(request: Request) {
+  return publicWidgetPreflight(request);
 }
 
 export async function GET(
@@ -56,32 +37,14 @@ export async function GET(
     if (error || !data) {
       return NextResponse.json(
         { error: 'Widget not found' },
-        { status: 404, headers: WIDGET_NO_STORE_HEADERS }
+        { status: 404, headers: NO_STORE_HEADERS }
       );
     }
-    return NextResponse.json(data, { headers: WIDGET_NO_STORE_HEADERS });
+    return NextResponse.json(data, { headers: NO_STORE_HEADERS });
   }
 
-  let allowedDomains: string[];
-  try {
-    allowedDomains = await getAllowedDomains();
-  } catch (error) {
-    if (error instanceof AllowedDomainsUnavailableError) {
-      return NextResponse.json(
-        { error: 'Widget access policy unavailable' },
-        { status: 503, headers: WIDGET_NO_STORE_HEADERS }
-      );
-    }
-    throw error;
-  }
-  const cors = getWidgetCorsHeaders(request, allowedDomains);
-
-  if (!cors.allowed) {
-    return NextResponse.json(
-      { error: 'Origin not allowed' },
-      { status: 403, headers: { ...cors.headers, ...WIDGET_NO_STORE_HEADERS } }
-    );
-  }
+  const access = await publicWidgetReadAccess(request);
+  if (!access.ok) return access.response;
 
   const { data, error } = await supabase
     .from('form_widgets')
@@ -89,21 +52,11 @@ export async function GET(
     .eq('id', id)
     .maybeSingle();
 
-  if (error) {
-    return NextResponse.json(
-      { error: 'Widget data unavailable' },
-      { status: 503, headers: { ...cors.headers, ...WIDGET_NO_STORE_HEADERS } }
-    );
-  }
-  if (!data) {
-    return NextResponse.json(
-      { error: 'Widget not found' },
-      { status: 404, headers: { ...cors.headers, ...WIDGET_NO_STORE_HEADERS } }
-    );
-  }
+  if (error) return publicWidgetUnavailable(access.corsHeaders);
+  if (!data) return publicWidgetNotFound(access.corsHeaders);
 
   return NextResponse.json(publicFormResponse(data), {
-    headers: { ...cors.headers, ...WIDGET_DATA_CACHE_HEADERS },
+    headers: cachedPublicJsonHeaders(access.corsHeaders, id),
   });
 }
 
@@ -131,11 +84,11 @@ export async function PATCH(
   if (error) {
     return NextResponse.json(
       { error: 'Update failed', message: error.message },
-      { status: 500, headers: WIDGET_NO_STORE_HEADERS }
+      { status: 500, headers: NO_STORE_HEADERS }
     );
   }
 
-  return NextResponse.json(data, { headers: WIDGET_NO_STORE_HEADERS });
+  return jsonSaved(data, await publishEmbedWidgets(request, [id]));
 }
 
 export async function DELETE(
@@ -155,9 +108,9 @@ export async function DELETE(
   if (error) {
     return NextResponse.json(
       { error: 'Delete failed', message: error.message },
-      { status: 500, headers: WIDGET_NO_STORE_HEADERS }
+      { status: 500, headers: NO_STORE_HEADERS }
     );
   }
 
-  return new NextResponse(null, { status: 204, headers: WIDGET_NO_STORE_HEADERS });
+  return deletedResponse(await publishEmbedWidgets(request, [id]));
 }

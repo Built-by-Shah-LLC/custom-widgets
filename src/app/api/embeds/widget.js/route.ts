@@ -1,5 +1,4 @@
-import { readFile } from 'node:fs/promises';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';

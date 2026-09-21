@@ -11,6 +11,7 @@ export interface SyncResult {
   totalReviews: number | null;
   averageRating: number | null;
   widgetsUpdated: number;
+  widgetIds: string[];
   reviewsFetched: number;
   targetReviews: number;
   complete: boolean;
@@ -185,6 +186,7 @@ export async function syncBusinessReviews(
     totalReviews,
     averageRating,
     widgetsUpdated: updatedWidgets?.length ?? 0,
+    widgetIds: (updatedWidgets ?? []).map((widget) => widget.id),
     reviewsFetched: rows.length,
     targetReviews,
     complete,
