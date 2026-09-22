@@ -1,5 +1,7 @@
 import type { BusinessInfo } from './reviews-data';
 import { formSchemaFingerprint } from './form-config';
+import { selectDisplayedReviews } from './review-sort';
+import { configFromDbRow } from './widget-config';
 import {
   mapBusinessRow,
   mapReviewRow,
@@ -121,14 +123,27 @@ export function publicWidgetRow(row: Record<string, unknown>): Record<string, un
   return withoutKeys(row, ['cached_reviews', 'businesses']);
 }
 
+/**
+ * Reviews a visitor actually needs. The stored cache can hold the full sync
+ * (hundreds of rows) so later filter and sort changes stay correct. This
+ * applies the widget's current rules and returns only the displayed slice.
+ */
+export function publicReviewList(row: Record<string, unknown>): ApiReview[] {
+  const cachedReviews = Array.isArray(row.cached_reviews) ? row.cached_reviews : [];
+  const config = configFromDbRow(row);
+  return selectDisplayedReviews(
+    cachedReviews.map((review) => mapReviewRow(review as ReviewRowLike)),
+    config
+  );
+}
+
 export function buildReviewsPayload(row: Record<string, unknown>): PublicReviewsPayload {
   const business = mapBusinessRow(row.businesses ?? null) ?? null;
-  const cachedReviews = Array.isArray(row.cached_reviews) ? row.cached_reviews : [];
   return {
     schemaVersion: PUBLIC_WIDGET_SCHEMA_VERSION,
     kind: 'reviews',
     config: { ...publicWidgetRow(row), id: row.id },
-    reviews: cachedReviews.map((review) => mapReviewRow(review as ReviewRowLike)),
+    reviews: publicReviewList(row),
     ...(business ? { business } : {}),
   };
 }

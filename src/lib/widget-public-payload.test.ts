@@ -3,6 +3,7 @@ import {
   buildFormPayload,
   buildReviewsPayload,
   publicFormResponse,
+  publicReviewList,
   safeJsString,
 } from './widget-public-payload';
 
@@ -37,6 +38,26 @@ describe('public widget payloads', () => {
 
     const withoutBusiness = buildReviewsPayload({ id: 'widget-2', cached_reviews: [] });
     expect(withoutBusiness).not.toHaveProperty('business');
+  });
+
+  it('sends only the reviews that survive the widget filters and maxReviews', () => {
+    const reviews = [
+      { id: 'low', authorName: 'A', rating: 3, text: 'Ok', relativeTime: '1 day ago' },
+      { id: 'no-photo', authorName: 'B', rating: 5, text: 'Good', relativeTime: '2 days ago', images: [] },
+      { id: 'skip', authorName: 'C', rating: 5, text: 'Hidden', relativeTime: '3 days ago', images: ['a.jpg'] },
+      { id: 'photo', authorName: 'D', rating: 4, text: 'Nice', relativeTime: '4 days ago', images: ['b.jpg'] },
+      { id: 'extra', authorName: 'E', rating: 5, text: 'Also', relativeTime: '5 days ago', images: ['c.jpg'] },
+    ];
+    const shown = publicReviewList({
+      cached_reviews: reviews,
+      min_rating: 4,
+      excluded_review_ids: ['skip'],
+      image_filtering: 'images_only',
+      sort_by: 'highest_rating',
+      max_reviews: 1,
+    });
+
+    expect(shown.map((review) => review.id)).toEqual(['extra']);
   });
 
   it('strips form delivery/storage settings from every public response shape', () => {

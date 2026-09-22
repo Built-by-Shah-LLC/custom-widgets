@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react';
 import type { WidgetConfig } from '@/lib/widget-config';
 import { resolveFontFamily, thumbnailSizePx, googlePhotoVariant } from '@/lib/widget-config';
 import type { BusinessInfo, Review } from '@/lib/reviews-data';
-import { reviewComparator } from '@/lib/review-sort';
+import { selectDisplayedReviews } from '@/lib/review-sort';
 import { GoogleLogo } from './GoogleReviewsWidget';
 import { ReviewLightbox, ReviewPhoto } from './ReviewLightbox';
 
@@ -56,19 +56,10 @@ export function GoogleReviewsCarousel({
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [viewportWidth, setViewportWidth] = useState<number | null>(null);
 
-  const filtered = useMemo(() => {
-    const excluded = new Set(config.excludedReviewIds);
-    return reviews
-      .filter((r) => r.rating >= config.minRating)
-      .filter((r) => !excluded.has(r.id))
-      .filter((r) => {
-        if (config.imageFiltering === 'images_only') return (r.images?.length ?? 0) > 0;
-        if (config.imageFiltering === 'no_images') return (r.images?.length ?? 0) === 0;
-        return true;
-      })
-      .sort(reviewComparator(config))
-      .slice(0, config.maxReviews);
-  }, [reviews, config.minRating, config.excludedReviewIds, config.imageFiltering, config.sortBy, config.maxReviews]);
+  const filtered = useMemo(
+    () => selectDisplayedReviews(reviews, config),
+    [reviews, config]
+  );
 
   // Responsive breakpoints (embed only), based on the screen/viewport width:
   // configured count above 1024px, 2 cards at 768–1024px, 1 card below 768px.

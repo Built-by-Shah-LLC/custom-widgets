@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
 import { cachedPublicJsonHeaders } from '@/lib/cache-headers';
-import { mapReviewRow } from '@/lib/widget-mappers';
+import { publicReviewList } from '@/lib/widget-public-payload';
 import {
   publicWidgetNotFound,
   publicWidgetPreflight,
@@ -25,7 +25,7 @@ export async function GET(
 
   const { data, error } = await supabase
     .from('widgets')
-    .select('cached_reviews')
+    .select('cached_reviews, min_rating, excluded_review_ids, image_filtering, sort_by, max_reviews')
     .eq('id', id)
     .maybeSingle();
 
@@ -33,11 +33,7 @@ export async function GET(
   if (!data) return publicWidgetNotFound(access.corsHeaders);
 
   return NextResponse.json(
-    {
-      reviews: Array.isArray(data.cached_reviews)
-        ? data.cached_reviews.map(mapReviewRow)
-        : [],
-    },
+    { reviews: publicReviewList(data) },
     { headers: cachedPublicJsonHeaders(access.corsHeaders, id) }
   );
 }

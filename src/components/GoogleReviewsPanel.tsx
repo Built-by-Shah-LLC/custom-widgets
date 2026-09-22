@@ -2,7 +2,7 @@
 
 import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import type { BusinessInfo, Review } from '@/lib/reviews-data';
-import { reviewComparator } from '@/lib/review-sort';
+import { selectDisplayedReviews } from '@/lib/review-sort';
 
 import type { WidgetConfig } from '@/lib/widget-config';
 import { defaultWidgetConfig, resolveFontFamily, thumbnailSizePx, googlePhotoVariant } from '@/lib/widget-config';
@@ -206,19 +206,10 @@ export function GoogleReviewsPanel({
 
   const reviewItems = reviews ?? EMPTY_REVIEWS;
 
-  const filtered = useMemo(() => {
-    const excluded = new Set(config.excludedReviewIds);
-    return reviewItems
-      .filter((r) => r.rating >= config.minRating)
-      .filter((r) => !excluded.has(r.id))
-      .filter((r) => {
-        if (config.imageFiltering === 'images_only') return (r.images?.length ?? 0) > 0;
-        if (config.imageFiltering === 'no_images') return (r.images?.length ?? 0) === 0;
-        return true;
-      })
-      .sort(reviewComparator(config))
-      .slice(0, config.maxReviews);
-  }, [reviewItems, config.minRating, config.excludedReviewIds, config.imageFiltering, config.sortBy, config.maxReviews]);
+  const filtered = useMemo(
+    () => selectDisplayedReviews(reviewItems, config),
+    [reviewItems, config]
+  );
 
   const visible = filtered.slice(0, visibleCount);
   const hasMore = visibleCount < filtered.length;
