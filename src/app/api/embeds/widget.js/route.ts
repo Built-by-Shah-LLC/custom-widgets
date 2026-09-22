@@ -45,6 +45,7 @@ export async function GET(request: Request) {
         headers: {
           ...WIDGET_SCRIPT_CACHE_HEADERS,
           'Access-Control-Allow-Origin': '*',
+          'Timing-Allow-Origin': '*',
           'Content-Type': 'application/javascript; charset=utf-8',
           'X-Content-Type-Options': 'nosniff',
           ETag: etag,
@@ -57,6 +58,7 @@ export async function GET(request: Request) {
         ...WIDGET_SCRIPT_CACHE_HEADERS,
         'Content-Type': 'application/javascript; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
+        'Timing-Allow-Origin': '*',
         'Content-Length': String(content.length),
         ETag: etag,
       },

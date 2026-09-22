@@ -11,11 +11,35 @@ interface AllowedDomain {
   created_at: string;
 }
 
-interface SettingsPageProps {
-  initialDomains: AllowedDomain[];
+export interface RecentLoadTiming {
+  id: string;
+  created_at: string;
+  widget_id: string;
+  host: string;
+  data_ms: number | null;
+  renderer_ms: number | null;
+  ok: boolean;
+  slower: string | null;
 }
 
-export function SettingsPage({ initialDomains }: SettingsPageProps) {
+interface SettingsPageProps {
+  initialDomains: AllowedDomain[];
+  recentLoads: RecentLoadTiming[];
+}
+
+function formatWhen(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function formatMs(value: number | null): string {
+  return value === null ? '—' : String(value);
+}
+
+export function SettingsPage({ initialDomains, recentLoads }: SettingsPageProps) {
   const [domains, setDomains] = useState<AllowedDomain[]>(initialDomains);
   const [input, setInput] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -212,6 +236,50 @@ export function SettingsPage({ initialDomains }: SettingsPageProps) {
               </li>
             ))}
           </ul>
+        )}
+      </Card>
+
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle>Recent loads</CardTitle>
+          <CardDescription>
+            Latest 100 embed load timings (data.js vs widget.js). Diagnostic only.
+          </CardDescription>
+        </CardHeader>
+
+        {recentLoads.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            No load timings recorded yet.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-[var(--color-border-light)] text-[var(--color-text-secondary)]">
+                  <th className="py-2 pr-3 font-medium">When</th>
+                  <th className="py-2 pr-3 font-medium">Widget id</th>
+                  <th className="py-2 pr-3 font-medium">Site</th>
+                  <th className="py-2 pr-3 font-medium">Data ms</th>
+                  <th className="py-2 pr-3 font-medium">Renderer ms</th>
+                  <th className="py-2 pr-3 font-medium">Result</th>
+                  <th className="py-2 font-medium">Slower</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border-light)]">
+                {recentLoads.map((row) => (
+                  <tr key={row.id} className="text-[var(--color-text-primary)]">
+                    <td className="py-2 pr-3 whitespace-nowrap">{formatWhen(row.created_at)}</td>
+                    <td className="py-2 pr-3 font-mono text-xs">{row.widget_id}</td>
+                    <td className="py-2 pr-3">{row.host}</td>
+                    <td className="py-2 pr-3 tabular-nums">{formatMs(row.data_ms)}</td>
+                    <td className="py-2 pr-3 tabular-nums">{formatMs(row.renderer_ms)}</td>
+                    <td className="py-2 pr-3">{row.ok ? 'ok' : 'failed'}</td>
+                    <td className="py-2">{row.slower ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </div>

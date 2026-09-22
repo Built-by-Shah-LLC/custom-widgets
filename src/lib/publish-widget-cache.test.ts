@@ -4,7 +4,7 @@ import {
   publicWidgetDataHeaders,
 } from './cache-headers';
 import { LIVE_CACHE_LAG_MESSAGE } from './live-cache-warning';
-import { publishWidgetCache } from './publish-widget-cache';
+import { publishWidgetCache, resolveWidgetPublishHost } from './publish-widget-cache';
 
 const WIDGET_ID = '004a7b18-6bcc-4b2a-a8f9-454012312690';
 const OTHER_ID = '1cb98d3c-e962-45be-8fac-5859aa7143b8';
@@ -34,6 +34,32 @@ describe('public widget cache headers', () => {
       'public, max-age=86400'
     );
     expect(WIDGET_SCRIPT_CACHE_HEADERS).not.toHaveProperty('Vercel-Cache-Tag');
+  });
+});
+
+describe('resolveWidgetPublishHost', () => {
+  it('warms the production domain when a save runs on the vercel.app alias', () => {
+    expect(
+      resolveWidgetPublishHost('https://custom-widgets-phi.vercel.app', {
+        VERCEL_ENV: 'production',
+        VERCEL_PROJECT_PRODUCTION_URL: 'builtbyshahwidgets.com',
+      })
+    ).toBe('https://builtbyshahwidgets.com');
+  });
+
+  it('keeps the preview origin so a preview purge is refilled on that preview', () => {
+    expect(
+      resolveWidgetPublishHost('https://custom-widgets-git-preview.vercel.app', {
+        VERCEL_ENV: 'preview',
+        VERCEL_PROJECT_PRODUCTION_URL: 'builtbyshahwidgets.com',
+      })
+    ).toBe('https://custom-widgets-git-preview.vercel.app');
+  });
+
+  it('uses the request origin when no production host is configured', () => {
+    expect(
+      resolveWidgetPublishHost('http://127.0.0.1:3000', {})
+    ).toBe('http://127.0.0.1:3000');
   });
 });
 

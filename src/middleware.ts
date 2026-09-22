@@ -22,6 +22,11 @@ function isPublicAlertPath(pathname: string, method: string): boolean {
   return pathname === '/api/v1/alerts' && method.toUpperCase() === 'POST';
 }
 
+/** Embed load timing beacon (rate-limited + host allowlisted in the route). */
+function isPublicWidgetTimingPath(pathname: string, method: string): boolean {
+  return pathname === '/api/v1/widget-timing' && method.toUpperCase() === 'POST';
+}
+
 /** Local Playwright harness — only when ENABLE_E2E_HARNESS=true. */
 function isE2eHarnessPath(pathname: string): boolean {
   return (
@@ -69,6 +74,7 @@ export async function middleware(request: NextRequest) {
     isPublicEmbedDataApi(pathname, method) ||
     isPublicFormSubmit(pathname, method) ||
     isPublicAlertPath(pathname, method) ||
+    isPublicWidgetTimingPath(pathname, method) ||
     isE2eHarnessPath(pathname)
   ) {
     return NextResponse.next({ request });

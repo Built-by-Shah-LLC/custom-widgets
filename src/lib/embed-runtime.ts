@@ -1,5 +1,6 @@
 import type { BootstrapData } from './bootstrap';
 import { normalizeBootstrapOrigin } from './bootstrap';
+import { sendWidgetLoadTiming } from './widget-load-timing';
 
 export const EMBED_SELECTORS = [
   '[data-bbs-embed]',
@@ -45,6 +46,8 @@ interface PlaceholderState {
   ownedMarker: boolean;
   shadowRoot?: ShadowRoot;
   cleanup?: () => void;
+  /** One timing beacon per placeholder attempt. */
+  timingSent?: boolean;
 }
 
 interface RuntimeStore {
@@ -214,6 +217,7 @@ export class EmbedRuntime {
       (placeholder.dataset.bbsMounted === 'true' && existingRoot !== ownedRoot)
     ) {
       state.lifecycle = 'failed';
+      this.reportTiming(state, false);
       this.warn(`Skipping externally owned widget placeholder ${widgetId}`);
       return;
     }
@@ -249,6 +253,7 @@ export class EmbedRuntime {
           this.mountLegacy(placeholder, state);
         } else {
           state.lifecycle = 'failed';
+          this.reportTiming(state, false);
           this.warn(`No valid bootstrap data for widget ${widgetId}`);
         }
       },
@@ -257,6 +262,7 @@ export class EmbedRuntime {
         if (known) this.mountLegacy(placeholder, state);
         else {
           state.lifecycle = 'failed';
+          this.reportTiming(state, false);
           this.warn(`Failed to load bootstrap data for widget ${widgetId}`);
         }
       }
@@ -312,6 +318,7 @@ export class EmbedRuntime {
     // current runtime never attaches a second root or unmounts that renderer.
     if ((existingRoot && existingRoot !== ownedRoot) || (marker && existingRoot !== ownedRoot)) {
       state.lifecycle = 'failed';
+      this.reportTiming(state, false);
       this.warn(`Skipping externally owned widget placeholder ${state.widgetId}`);
       return;
     }
@@ -355,6 +362,7 @@ export class EmbedRuntime {
         }
       };
       state.lifecycle = 'mounted';
+      this.reportTiming(state, true);
     } catch (error) {
       state.lifecycle = 'failed';
       state.shadowRoot?.replaceChildren();
@@ -362,8 +370,15 @@ export class EmbedRuntime {
         delete placeholder.dataset.bbsMounted;
       }
       state.ownedMarker = false;
+      this.reportTiming(state, false);
       this.warn(`Failed to mount widget ${state.widgetId}: ${String(error)}`);
     }
+  }
+
+  private reportTiming(state: PlaceholderState, ok: boolean): void {
+    if (state.timingSent) return;
+    state.timingSent = true;
+    sendWidgetLoadTiming(this.apiOrigin, state.widgetId, ok);
   }
 
   private cleanupPlaceholder(placeholder: HTMLElement): void {

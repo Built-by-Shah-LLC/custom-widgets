@@ -16,6 +16,22 @@ export interface PublishWidgetCacheDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Production saves warm the canonical production hostname, which is the host
+ * customer snippets use. Preview saves warm the preview origin, because a
+ * preview purge does not clear production. Local saves have no CDN.
+ */
+export function resolveWidgetPublishHost(
+  requestOrigin: string,
+  env: { VERCEL_ENV?: string; VERCEL_PROJECT_PRODUCTION_URL?: string }
+): string {
+  if (env.VERCEL_ENV !== 'production') return requestOrigin;
+  const productionHost = env.VERCEL_PROJECT_PRODUCTION_URL?.trim().replace(/\/+$/, '');
+  if (!productionHost) return requestOrigin;
+  const host = productionHost.replace(/^https?:\/\//, '');
+  return `https://${host}`;
+}
+
 function dataJsUrl(widgetHost: string, widgetId: string): string | null {
   let url: URL;
   try {
@@ -89,10 +105,11 @@ async function warmWidget(
 }
 
 /**
- * Hard-deletes widget-<id> in every Vercel region, then GETs data.js once so
- * the region running this function (Washington / iad1 on Hobby) stores the
- * new body. Other regions fill on their first real visitor. widget.js is not
- * tagged and is not requested here.
+ * Hard-deletes widget-<id> on every Vercel edge, then GETs data.js once.
+ * That GET fills only the edge that handles this request. The project stays
+ * in one function region so a miss stays next to the database. Other edges
+ * fill when their first visitor arrives. widget.js is not tagged and is not
+ * requested here.
  */
 export async function publishWidgetCache(
   widgetIds: string[],

@@ -144,6 +144,7 @@ export async function GET(
       'Content-Type': 'application/javascript; charset=utf-8',
       'X-Content-Type-Options': 'nosniff',
       'Access-Control-Allow-Origin': '*',
+      'Timing-Allow-Origin': '*',
     },
   });
 }
