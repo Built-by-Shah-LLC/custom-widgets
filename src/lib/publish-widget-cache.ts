@@ -50,6 +50,20 @@ function cacheFill(response: Response): 'stored' | 'hit' | 'unknown' {
   return 'unknown';
 }
 
+/**
+ * HIT means the previous object is still being served. A 404/403 is no-store,
+ * so anything other than HIT means the old widget is gone. A 200 without a
+ * cache label is the new body, not a 24h lag.
+ */
+export function warmResponseSettled(response: Response): boolean {
+  if (cacheFill(response) === 'hit') return false;
+  if (cacheFill(response) === 'stored') return true;
+  if (response.status === 400 || response.status === 403 || response.status === 404) {
+    return true;
+  }
+  return response.status >= 200 && response.status < 300;
+}
+
 async function deleteTags(tags: string[], deleteByTag: DeleteByTag): Promise<boolean> {
   const options = { revalidationDeadlineSeconds: 0 };
   try {
@@ -91,14 +105,13 @@ async function warmWidget(
     return false;
   }
 
-  const fill = cacheFill(first);
-  if (fill === 'stored') return true;
-  if (fill !== 'hit') return false;
+  if (warmResponseSettled(first)) return true;
+  if (cacheFill(first) !== 'hit') return false;
 
   await sleep(WARM_RETRY_DELAY_MS);
   try {
     const second = await requestData(url, fetchImpl);
-    return cacheFill(second) === 'stored';
+    return warmResponseSettled(second);
   } catch {
     return false;
   }
@@ -106,10 +119,9 @@ async function warmWidget(
 
 /**
  * Hard-deletes widget-<id> on every Vercel edge, then GETs data.js once.
- * That GET fills only the edge that handles this request. The project stays
- * in one function region so a miss stays next to the database. Other edges
- * fill when their first visitor arrives. widget.js is not tagged and is not
- * requested here.
+ * The GET has no Origin or Referer, so data.js does not store it. The purge
+ * drops every caller's copy; the next allowed page load stores its own.
+ * widget.js is not tagged and is not requested here.
  */
 export async function publishWidgetCache(
   widgetIds: string[],

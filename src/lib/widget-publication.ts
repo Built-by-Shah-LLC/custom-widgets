@@ -11,7 +11,10 @@ export async function publishEmbedWidgets(
   try {
     return await publishWidgetCache(
       widgetIds,
-      resolveWidgetPublishHost(new URL(request.url).origin, process.env)
+      resolveWidgetPublishHost(new URL(request.url).origin, {
+        VERCEL_ENV: process.env.VERCEL_ENV,
+        VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+      })
     );
   } catch {
     return laggingCache();

@@ -4,7 +4,11 @@ import {
   publicWidgetDataHeaders,
 } from './cache-headers';
 import { LIVE_CACHE_LAG_MESSAGE } from './live-cache-warning';
-import { publishWidgetCache, resolveWidgetPublishHost } from './publish-widget-cache';
+import {
+  publishWidgetCache,
+  resolveWidgetPublishHost,
+  warmResponseSettled,
+} from './publish-widget-cache';
 
 const WIDGET_ID = '004a7b18-6bcc-4b2a-a8f9-454012312690';
 const OTHER_ID = '1cb98d3c-e962-45be-8fac-5859aa7143b8';
@@ -122,6 +126,20 @@ describe('publishWidgetCache', () => {
     expect(result).toEqual({ fresh: true });
     expect(sleep).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a deleted widget 404 as cleared, not a 24h lag', async () => {
+    const result = await publishWidgetCache([WIDGET_ID], HOST, {
+      deleteByTag: vi.fn().mockResolvedValue(undefined),
+      fetch: vi.fn().mockResolvedValue(response(null, 404)),
+    });
+    expect(result).toEqual({ fresh: true });
+  });
+
+  it('treats a 200 without a cache label as settled', () => {
+    expect(warmResponseSettled(response(null, 200))).toBe(true);
+    expect(warmResponseSettled(response(null, 500))).toBe(false);
+    expect(warmResponseSettled(response('HIT', 200))).toBe(false);
   });
 
   it('warns when the old object is still a HIT after the retry', async () => {

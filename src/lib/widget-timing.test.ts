@@ -5,6 +5,7 @@ import {
   parseDurationMs,
   parseOk,
   parseTimingHost,
+  timingHostMatchesCaller,
 } from './widget-timing';
 
 describe('parseTimingHost', () => {
@@ -54,6 +55,15 @@ describe('computeSlower', () => {
     expect(computeSlower(100, 50)).toBe('data');
     expect(computeSlower(40, 90)).toBe('renderer');
     expect(computeSlower(70, 70)).toBe('data');
+  });
+});
+
+describe('timingHostMatchesCaller', () => {
+  it('requires the posted host to match Origin or Referer', () => {
+    expect(timingHostMatchesCaller('dealer.example', 'https://dealer.example/page')).toBe(true);
+    expect(timingHostMatchesCaller('dealer.example', 'https://www.dealer.example/')).toBe(true);
+    expect(timingHostMatchesCaller('dealer.example', 'https://evil.example')).toBe(false);
+    expect(timingHostMatchesCaller('dealer.example', null)).toBe(false);
   });
 });
 

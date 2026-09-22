@@ -49,3 +49,25 @@ export function computeSlower(
 export function isValidWidgetIdString(id: string): boolean {
   return UUID_RE.test(id);
 }
+
+function hostnameOf(origin: string): string | null {
+  try {
+    return new URL(origin).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The posted host must be the browser's Origin or Referer. A body alone
+ * cannot claim some other allowlisted site.
+ */
+export function timingHostMatchesCaller(
+  host: string,
+  callerOrigin: string | null
+): boolean {
+  if (!callerOrigin) return false;
+  const callerHost = hostnameOf(callerOrigin);
+  if (!callerHost) return false;
+  return callerHost === host.replace(/^www\./, '').toLowerCase();
+}

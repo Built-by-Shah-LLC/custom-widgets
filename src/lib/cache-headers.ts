@@ -33,7 +33,8 @@ export function cachedPublicJsonHeaders(
   widgetId: string
 ): Record<string, string> {
   // JSON echoes Access-Control-Allow-Origin, so Vary stays on these 200s.
-  // data.js uses * and omits Vary, which is the shared regional entry.
+  // data.js also varies on Origin and Referer. A cached body is not reused
+  // for a different caller.
   return {
     ...corsHeaders,
     ...publicWidgetDataHeaders(widgetId),

@@ -17,8 +17,9 @@ import { WIDGET_NO_STORE_HEADERS, publicWidgetDataHeaders } from '@/lib/cache-he
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The function still runs on a cache miss. Successful bodies are stored on
-// Vercel for 24h under widget-<id>. Errors stay no-store.
+// A caller that sends Origin or Referer may be cached for 24h, but only for
+// that same caller. A headerless response is never stored, so it cannot
+// prime a body that a disallowed site would later receive.
 export const dynamic = 'force-dynamic';
 
 function noStoreHeaders(extra: Record<string, string> = {}) {
@@ -136,11 +137,15 @@ export async function GET(
     `window.__BBS_WIDGET_DATA__[${serializedId}]=window.__BBS_WIDGET_DATA_BY_ORIGIN__[${serializedOrigin}][${serializedId}];` +
     `window.dispatchEvent(new CustomEvent("bbs:widget-data-ready",{detail:{id:${serializedId},origin:${serializedOrigin}}}));`;
 
+  // Headerless reads stay uncached. Caching them would let every later caller
+  // share one entry and skip the allowlist.
+  const cacheHeaders = origin
+    ? { ...publicWidgetDataHeaders(id), Vary: 'Origin, Referer' }
+    : noStoreHeaders();
+
   return new NextResponse(body, {
     headers: {
-      // No Vary: the body is identical for every dealer, and ACAO is *.
-      // One Washington GET after a save fills this URL for every site on that edge.
-      ...publicWidgetDataHeaders(id),
+      ...cacheHeaders,
       'Content-Type': 'application/javascript; charset=utf-8',
       'X-Content-Type-Options': 'nosniff',
       'Access-Control-Allow-Origin': '*',

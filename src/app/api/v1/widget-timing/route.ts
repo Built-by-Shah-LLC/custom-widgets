@@ -4,6 +4,7 @@ import { NO_STORE_HEADERS } from '@/lib/cache-headers';
 import {
   AllowedDomainsUnavailableError,
   getAllowedDomains,
+  getRequestOrigin,
   isOriginAllowed,
 } from '@/lib/domain-utils';
 import {
@@ -12,6 +13,7 @@ import {
   parseDurationMs,
   parseOk,
   parseTimingHost,
+  timingHostMatchesCaller,
 } from '@/lib/widget-timing';
 
 export const dynamic = 'force-dynamic';
@@ -95,8 +97,12 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  // Compare hostname the same way embed origin checks do.
-  if (!isOriginAllowed(`https://${host}`, allowedDomains)) {
+  // The body host must be the caller, and that caller must be allowlisted.
+  const caller = getRequestOrigin(request);
+  if (
+    !timingHostMatchesCaller(host, caller) ||
+    !isOriginAllowed(caller, allowedDomains)
+  ) {
     return noStore(403, { error: 'Host not allowed' });
   }
 
