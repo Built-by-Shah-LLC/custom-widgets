@@ -86,5 +86,12 @@ export function GoogleReviewsCarouselEmbed({
   if (failed) return null;
   if (!config) return <WidgetSkeleton minHeight="220px" />;
 
-  return <GoogleReviewsCarousel config={config} business={business} reviews={reviews} />;
+  return (
+    <GoogleReviewsCarousel
+      config={config}
+      business={business}
+      reviews={reviews}
+      apiOrigin={apiOrigin}
+    />
+  );
 }

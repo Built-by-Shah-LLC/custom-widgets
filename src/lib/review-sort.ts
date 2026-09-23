@@ -2,7 +2,6 @@
 // Reviews only carry Google's relative date string ("3 weeks ago"), so
 // newest/oldest sorting parses that into an approximate age in ms.
 
-import type { Review } from './reviews-data';
 import type { WidgetConfig } from './widget-config';
 
 const UNIT_MS: Record<string, number> = {
@@ -72,7 +71,7 @@ export function selectDisplayedReviews<T extends DisplayedReview>(
 /** Comparator for the configured sort. 'most_relevant' keeps Google's order. */
 export function reviewComparator(
   config: Pick<WidgetConfig, 'sortBy' | 'imageFiltering'>
-): (a: Review, b: Review) => number {
+): (a: DisplayedReview, b: DisplayedReview) => number {
   return (a, b) => {
     if (config.imageFiltering === 'images_first') {
       // Boolean has-images grouping only — comparing counts would let a

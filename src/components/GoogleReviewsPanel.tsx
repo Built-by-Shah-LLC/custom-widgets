@@ -156,6 +156,7 @@ interface GoogleReviewsPanelProps {
   config?: WidgetConfig;
   business?: BusinessInfo;
   reviews?: Review[];
+  apiOrigin?: string;
 }
 
 const EMPTY_REVIEWS: Review[] = [];
@@ -166,6 +167,7 @@ export function GoogleReviewsPanel({
   config = defaultWidgetConfig,
   business,
   reviews,
+  apiOrigin = '',
 }: GoogleReviewsPanelProps) {
   const [visibleCount, setVisibleCount] = useState(config.drawerReviewsPerPage);
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
@@ -253,7 +255,7 @@ export function GoogleReviewsPanel({
 
   return (
     <>
-      {lightbox && <ReviewLightbox images={lightbox.images} initialIndex={lightbox.index} onClose={() => setLightbox(null)} />}
+      {lightbox && <ReviewLightbox images={lightbox.images} initialIndex={lightbox.index} onClose={() => setLightbox(null)} apiOrigin={apiOrigin} />}
 
       {isOpen && (
         <div
@@ -485,11 +487,12 @@ export function GoogleReviewsPanel({
                         <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                           {review.images!.map((src, i) => (
                             <ReviewPhoto
-                              key={i}
+                              key={`${src}-${i}`}
                               src={googlePhotoVariant(src, reviewImageSize * 2)}
                               size={reviewImageSize}
                               borderRadius={8}
                               onClick={() => setLightbox({ images: review.images!, index: i })}
+                              apiOrigin={apiOrigin}
                             />
                           ))}
                         </div>
