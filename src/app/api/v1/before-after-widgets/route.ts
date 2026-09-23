@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
+import { NO_STORE_HEADERS } from '@/lib/cache-headers';
 import { requireAdmin } from '@/lib/require-admin';
+import { jsonSaved, publishEmbedWidgets } from '@/lib/widget-publication';
+
+export const maxDuration = 60;
 
 // Creates a before/after widget (used by the home-page modal for
 // "Create New" and duplicate).
@@ -30,9 +34,9 @@ export async function POST(request: Request) {
           ? 'Database migration 015_before_after_auto_slide.sql has not been applied.'
           : error.message,
       },
-      { status: 500 }
+      { status: 500, headers: NO_STORE_HEADERS }
     );
   }
 
-  return NextResponse.json(data, { status: 201 });
+  return jsonSaved(data, await publishEmbedWidgets(request, [data.id]), 201);
 }

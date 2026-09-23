@@ -1,21 +1,18 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
+import { cachedPublicJsonHeaders } from '@/lib/cache-headers';
+import { publicReviewList } from '@/lib/widget-public-payload';
 import {
-  getAllowedDomains,
-  getWidgetCorsHeaders,
-} from '@/lib/domain-utils';
-import { NO_STORE, WIDGET_CACHE_CONTROL } from '@/lib/cache-headers';
+  publicWidgetNotFound,
+  publicWidgetPreflight,
+  publicWidgetReadAccess,
+  publicWidgetUnavailable,
+} from '@/lib/public-widget-access';
 
-export async function OPTIONS(request: Request) {
-  const allowedDomains = await getAllowedDomains();
-  const cors = getWidgetCorsHeaders(request, allowedDomains);
+export const dynamic = 'force-dynamic';
 
-  return new NextResponse(null, {
-    status: cors.allowed ? 204 : 403,
-    headers: cors.allowed
-      ? cors.headers
-      : { ...cors.headers, 'Cache-Control': NO_STORE },
-  });
+export function OPTIONS(request: Request) {
+  return publicWidgetPreflight(request);
 }
 
 export async function GET(
@@ -23,31 +20,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const allowedDomains = await getAllowedDomains();
-  const cors = getWidgetCorsHeaders(request, allowedDomains);
-
-  if (!cors.allowed) {
-    return NextResponse.json(
-      { error: 'Origin not allowed' },
-      { status: 403, headers: { ...cors.headers, 'Cache-Control': NO_STORE } }
-    );
-  }
+  const access = await publicWidgetReadAccess(request);
+  if (!access.ok) return access.response;
 
   const { data, error } = await supabase
     .from('widgets')
-    .select('cached_reviews')
+    .select('cached_reviews, min_rating, excluded_review_ids, image_filtering, sort_by, max_reviews')
     .eq('id', id)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    return NextResponse.json(
-      { error: 'Widget not found' },
-      { status: 404, headers: { ...cors.headers, 'Cache-Control': NO_STORE } }
-    );
-  }
+  if (error) return publicWidgetUnavailable(access.corsHeaders);
+  if (!data) return publicWidgetNotFound(access.corsHeaders);
 
   return NextResponse.json(
-    { reviews: data.cached_reviews ?? [] },
-    { headers: { ...cors.headers, 'Cache-Control': WIDGET_CACHE_CONTROL } }
+    { reviews: publicReviewList(data) },
+    { headers: cachedPublicJsonHeaders(access.corsHeaders, id) }
   );
 }

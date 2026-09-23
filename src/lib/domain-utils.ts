@@ -1,30 +1,28 @@
 import { supabase } from './db';
 
-// 5-minute in-memory TTL: only helps warm serverless instances (the first
-// request to a fresh instance still reads allowed_domains), but cuts repeat
-// DB round-trips on the hot path.
-const ALLOWED_DOMAINS_CACHE_TTL_MS = 300_000;
-
-let allowedDomainsCache: {
-  domains: string[];
-  expiresAt: number;
-} | null = null;
+/** Public reads must fail closed when admission data cannot be loaded. */
+export class AllowedDomainsUnavailableError extends Error {
+  constructor(message = 'Allowed domains could not be loaded') {
+    super(message);
+    this.name = 'AllowedDomainsUnavailableError';
+  }
+}
 
 export async function getAllowedDomains(): Promise<string[]> {
-  const now = Date.now();
-  if (allowedDomainsCache && allowedDomainsCache.expiresAt > now) {
-    return allowedDomainsCache.domains;
+  try {
+    const { data, error } = await supabase
+      .from('allowed_domains')
+      .select('domain');
+    if (error) {
+      throw new AllowedDomainsUnavailableError(error.message);
+    }
+    return (data ?? []).map((d) => d.domain);
+  } catch (error) {
+    if (error instanceof AllowedDomainsUnavailableError) throw error;
+    throw new AllowedDomainsUnavailableError(
+      error instanceof Error ? error.message : 'Allowed domains query failed'
+    );
   }
-
-  const { data } = await supabase.from('allowed_domains').select('domain');
-  const domains = (data ?? []).map((d) => d.domain);
-
-  allowedDomainsCache = {
-    domains,
-    expiresAt: now + ALLOWED_DOMAINS_CACHE_TTL_MS,
-  };
-
-  return domains;
 }
 
 export function normalizeDomain(input: string): string {
@@ -110,9 +108,9 @@ export function getWidgetCorsHeaders(
   if (!isOriginAllowed(origin, allowedDomains)) {
     return {
       allowed: false,
-      // Vary: Origin keeps shared caches from serving one origin's 403 to
-      // another (review issue 9 / spec amendment 5).
-      headers: { 'Content-Type': 'application/json', 'Vary': 'Origin' },
+      // Access decisions use Origin, then Referer. Every response must vary
+      // on both headers so a shared cache cannot cross-contaminate callers.
+      headers: { 'Content-Type': 'application/json', 'Vary': 'Origin, Referer' },
     };
   }
 
@@ -122,7 +120,7 @@ export function getWidgetCorsHeaders(
       'Access-Control-Allow-Origin': origin || '*',
       'Access-Control-Allow-Methods': 'GET, PATCH, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
-      'Vary': 'Origin',
+      'Vary': 'Origin, Referer',
     },
   };
 }

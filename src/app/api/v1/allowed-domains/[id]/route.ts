@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
 import { normalizeDomain } from '@/lib/domain-utils';
 import { requireAdmin } from '@/lib/require-admin';
+import {
+  deletedResponse,
+  jsonSaved,
+  publishAllEmbedWidgets,
+} from '@/lib/widget-publication';
+
+export const maxDuration = 60;
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +60,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
   }
 
-  return NextResponse.json(data);
+  return jsonSaved(data, await publishAllEmbedWidgets(request));
 }
 
 export async function DELETE(
@@ -65,10 +72,11 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const { error, count } = await supabase
+  const { data, error } = await supabase
     .from('allowed_domains')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
 
   if (error) {
     return NextResponse.json(
@@ -77,9 +85,9 @@ export async function DELETE(
     );
   }
 
-  if (!count) {
+  if (!data?.length) {
     return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
   }
 
-  return new NextResponse(null, { status: 204 });
+  return deletedResponse(await publishAllEmbedWidgets(request));
 }

@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { assertE2EEnvironment } from '../src/lib/e2e-environment-guard';
+
+test.beforeAll(() => assertE2EEnvironment(process.env, 'mutation'));
 
 const TEST_NAME_PREFIX = '[TEST]';
 

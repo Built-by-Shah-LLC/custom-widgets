@@ -3,18 +3,28 @@ import { createServerClient } from '@supabase/ssr';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 
 /** Embed script + bootstrap data — no session required. */
-function isPublicEmbedPath(pathname: string): boolean {
-  return (
+function isPublicEmbedPath(pathname: string, method: string): boolean {
+  const upperMethod = method.toUpperCase();
+  const isScriptAlias =
     pathname === '/api/embeds/widget.js' ||
+    pathname === '/widget.js' ||
+    /^\/widget\.[a-f0-9]{16}\.js$/.test(pathname);
+  if (isScriptAlias) return upperMethod === 'GET' || upperMethod === 'HEAD';
+
+  return (
     pathname === '/widget-manifest.json' ||
-    /^\/widget\.[a-f0-9]{16}\.js$/.test(pathname) ||
     pathname.startsWith('/api/embeds/widget/')
-  );
+  ) && ['GET', 'HEAD', 'OPTIONS'].includes(upperMethod);
 }
 
 /** Client/embed critical alert intake (rate-limited in the route). */
 function isPublicAlertPath(pathname: string, method: string): boolean {
   return pathname === '/api/v1/alerts' && method.toUpperCase() === 'POST';
+}
+
+/** Embed load timing beacon (rate-limited + host allowlisted in the route). */
+function isPublicWidgetTimingPath(pathname: string, method: string): boolean {
+  return pathname === '/api/v1/widget-timing' && method.toUpperCase() === 'POST';
 }
 
 /** Local Playwright harness — only when ENABLE_E2E_HARNESS=true. */
@@ -58,6 +68,19 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const method = request.method;
 
+  // Public embed reads must not pay the session refresh/auth setup cost. The
+  // route handlers still perform origin admission and method validation.
+  if (
+    isPublicEmbedPath(pathname, method) ||
+    isPublicEmbedDataApi(pathname, method) ||
+    isPublicFormSubmit(pathname, method) ||
+    isPublicAlertPath(pathname, method) ||
+    isPublicWidgetTimingPath(pathname, method) ||
+    isE2eHarnessPath(pathname)
+  ) {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
@@ -85,14 +108,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  if (
-    pathname === '/login' ||
-    isPublicEmbedPath(pathname) ||
-    isPublicEmbedDataApi(pathname, method) ||
-    isPublicFormSubmit(pathname, method) ||
-    isPublicAlertPath(pathname, method) ||
-    isE2eHarnessPath(pathname)
-  ) {
+  if (pathname === '/login') {
     return response;
   }
 

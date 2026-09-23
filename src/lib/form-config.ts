@@ -82,6 +82,15 @@ export interface FormStep {
 export interface FormConfig {
   steps: FormStep[];
 
+  /**
+   * Mapper metadata, never a database column. A public rendering payload does
+   * not contain delivery/storage policy, so formToDbRow must not turn its
+   * fallback values into an update that clears or enables those settings.
+   * Configs created by the editor/defaultFormConfig leave this undefined and
+   * therefore serialize all private fields as before.
+   */
+  __privateDeliveryFieldsPresent?: FormPrivateDeliveryFieldPresence;
+
   // Logo
   logoUrl: string;
   logoLinkUrl: string;
@@ -142,6 +151,12 @@ export interface FormConfig {
   successRedirectUrl: string;
   successRedirectDelay: number;
   errorMessage: string;
+}
+
+export interface FormPrivateDeliveryFieldPresence {
+  submitWebhookUrl: boolean;
+  submitEmail: boolean;
+  storeSubmissions: boolean;
 }
 
 export function makeFieldId(): string {
@@ -343,6 +358,12 @@ export function formFromDbRow(row: Record<string, any>): FormConfig {
   return {
     steps: Array.isArray(row.steps) ? (row.steps as FormStep[]) : [],
 
+    __privateDeliveryFieldsPresent: {
+      submitWebhookUrl: Object.prototype.hasOwnProperty.call(row, 'submit_webhook_url'),
+      submitEmail: Object.prototype.hasOwnProperty.call(row, 'submit_email'),
+      storeSubmissions: Object.prototype.hasOwnProperty.call(row, 'store_submissions'),
+    },
+
     logoUrl: row.logo_url ?? '',
     logoLinkUrl: row.logo_link_url ?? '',
     logoWidth: row.logo_width ?? 160,
@@ -401,7 +422,7 @@ export function formFromDbRow(row: Record<string, any>): FormConfig {
 }
 
 export function formToDbRow(config: FormConfig): Record<string, unknown> {
-  return {
+  const row: Record<string, unknown> = {
     steps: config.steps,
 
     logo_url: config.logoUrl,
@@ -445,9 +466,6 @@ export function formToDbRow(config: FormConfig): Record<string, unknown> {
     show_progress: config.showProgress,
     progress_style: config.progressStyle,
 
-    submit_webhook_url: config.submitWebhookUrl,
-    submit_email: config.submitEmail,
-    store_submissions: config.storeSubmissions,
     honeypot_enabled: config.honeypotEnabled,
 
     success_heading: config.successHeading,
@@ -458,6 +476,125 @@ export function formToDbRow(config: FormConfig): Record<string, unknown> {
 
     updated_at: new Date().toISOString(),
   };
+
+  const privateFields = config.__privateDeliveryFieldsPresent;
+  if (!privateFields || privateFields.submitWebhookUrl) {
+    row.submit_webhook_url = config.submitWebhookUrl;
+  }
+  if (!privateFields || privateFields.submitEmail) {
+    row.submit_email = config.submitEmail;
+  }
+  if (!privateFields || privateFields.storeSubmissions) {
+    row.store_submissions = config.storeSubmissions;
+  }
+
+  return row;
+}
+
+/**
+ * Stable content fingerprint for the answer contract. It intentionally covers
+ * field semantics rather than updated_at, because direct maintenance writes
+ * may leave timestamps unchanged. The compact non-cryptographic hash is only
+ * a change detector; form submission validation remains authoritative.
+ */
+export function formSchemaFingerprint(
+  rowOrConfig: Record<string, unknown> | FormConfig
+): string {
+  const rawSteps = rowOrConfig.steps;
+  const steps = Array.isArray(rawSteps) ? rawSteps : [];
+  const schema = steps.map((step) => {
+    const s = (step ?? {}) as Record<string, unknown>;
+    const fields = Array.isArray(s.fields) ? s.fields : [];
+    return {
+      id: s.id ?? '',
+      heading: s.heading ?? '',
+      description: s.description ?? '',
+      footerNote: s.footerNote ?? '',
+      visibilityRule: s.visibilityRule ?? null,
+      styleOverrides: s.styleOverrides ?? null,
+      fields: fields.map((field) => {
+        const f = (field ?? {}) as Record<string, unknown>;
+        return {
+          id: f.id ?? '',
+          type: f.type ?? '',
+          label: f.label ?? '',
+          placeholder: f.placeholder ?? '',
+          required: f.required ?? false,
+          defaultValue: f.defaultValue ?? null,
+          options: f.options ?? [],
+          validation: f.validation ?? null,
+          visibilityRule: f.visibilityRule ?? null,
+          styleOverrides: f.styleOverrides ?? null,
+        };
+      }),
+    };
+  });
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, nested]) => [key, canonicalize(nested)])
+      );
+    }
+    return value;
+  };
+  const input = JSON.stringify(canonicalize(schema));
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b1;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    first ^= code;
+    first = Math.imul(first, 0x01000193);
+    second ^= code + index;
+    second = Math.imul(second, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(
+    second >>> 0
+  )
+    .toString(16)
+    .padStart(8, '0')}`;
+}
+
+/**
+ * Reject answer keys/types/choice values that are not represented by the
+ * current server schema. `website` is the one explicit honeypot key allowed
+ * outside the configured fields.
+ */
+export function validateAnswerShape(
+  config: FormConfig,
+  answers: Record<string, unknown>
+): string | null {
+  const fields = new Map(config.steps.flatMap((step) => step.fields).map((field) => [field.id, field]));
+  for (const [fieldId, value] of Object.entries(answers)) {
+    if (fieldId === 'website') continue;
+    const field = fields.get(fieldId);
+    if (!field) return 'The form changed. Please reload and try again.';
+
+    if (field.type === 'checkbox-group') {
+      if (!Array.isArray(value)) {
+        return 'The form changed. Please reload and try again.';
+      }
+      const labels = new Set((field.options ?? []).map((option) => option.label));
+      if (value.some((entry) => typeof entry !== 'string' || !labels.has(entry))) {
+        return 'The form changed. Please reload and try again.';
+      }
+      continue;
+    }
+
+    if (Array.isArray(value) || (value !== null && typeof value === 'object')) {
+      return 'The form changed. Please reload and try again.';
+    }
+
+    if ((field.type === 'radio' || field.type === 'select') && value !== '' && value != null) {
+      const labels = new Set((field.options ?? []).map((option) => option.label));
+      if (typeof value !== 'string' || !labels.has(value)) {
+        return 'The form changed. Please reload and try again.';
+      }
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

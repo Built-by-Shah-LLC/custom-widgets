@@ -6,6 +6,8 @@ import { beforeAfterToDbRow } from '@/lib/before-after-config';
 import { BeforeAfterWidget } from '@/components/BeforeAfterWidget';
 import { EditorShell, type EditorTabDef, type EditorTabMeta } from './EditorShell';
 import { ContentTab, LayoutTab, SettingsTab, StyleTab } from './before-after-tabs';
+import { liveCacheWarningFromText } from '@/lib/live-cache-warning';
+import { showToast } from '@/components/ui/Toast';
 
 export interface BeforeAfterEditorWidget {
   widgetId: string;
@@ -107,7 +109,10 @@ export function BeforeAfterEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: widgetName, ...beforeAfterToDbRow(config) }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
+      const warning = liveCacheWarningFromText(raw);
+      if (warning) showToast(warning, 'warning', 8000);
       setSaved(true);
     } catch (err) {
       alert(`Save failed: ${err instanceof Error ? err.message : 'unknown error'}`);

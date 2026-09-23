@@ -7,6 +7,7 @@ import {
   useReducedMotion,
   type Transition,
 } from 'framer-motion';
+import { liveCacheWarningOf } from '@/lib/live-cache-warning';
 import { cn } from '@/lib/utils/cn';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -106,6 +107,15 @@ export function ToastContainer() {
         ))}
       </AnimatePresence>
     </div>
+  );
+}
+
+export function showSaveResult(value: unknown, successMessage: string) {
+  const warning = liveCacheWarningOf(value);
+  showToast(
+    warning ? `${successMessage.replace(/\.?$/, '.')} ${warning}` : successMessage,
+    warning ? 'warning' : 'success',
+    warning ? 8000 : undefined
   );
 }
 

@@ -4,55 +4,50 @@ import { useEffect, useState } from 'react';
 import type { BusinessInfo, Review } from '@/lib/reviews-data';
 import type { WidgetConfig } from '@/lib/widget-config';
 import { configFromDbRow } from '@/lib/widget-config';
-import { getBootstrappedData } from '@/lib/bootstrap';
+import { getBootstrappedData, type BootstrapData } from '@/lib/bootstrap';
 import { getWidgetConfig, getWidgetReviews } from '@/lib/prefetch';
 import { mapBusinessRow, mapReviewsToClient } from '@/lib/widget-mappers';
 import { GoogleReviewsWidget } from './GoogleReviewsWidget';
 import { WidgetSkeleton } from './WidgetSkeleton';
 
 /**
- * Embed loader. With the data.js bootstrap snippet the first React paint IS
- * the real widget (config + business + reviews initialized synchronously from
- * window.__BBS_WIDGET_DATA__); with legacy snippets it paints a skeleton and
- * the script-eval-time prefetch (already in flight from embed.tsx) resolves
- * right after mount. The API is always re-fetched in the background to
- * revalidate, but state only updates when the payload actually differs — no
- * spurious repaints.
+ * Embed loader for a reviews badge. A validated bootstrap snapshot is
+ * captured once for this mount and is authoritative for the initial render;
+ * it prevents a later same-ID script from changing the data while React is
+ * starting. Legacy one-script embeds retain their deduped JSON fallback.
  */
 export function GoogleReviewsEmbed({
   widgetId,
   apiOrigin = '',
+  bootstrap,
 }: {
   widgetId: string;
   apiOrigin?: string;
+  bootstrap?: BootstrapData;
 }) {
-  const [config, setConfig] = useState<WidgetConfig | null>(() => {
-    const bootstrap = getBootstrappedData(widgetId);
-    return bootstrap?.kind === 'reviews'
-      ? configFromDbRow(bootstrap.config)
-      : null;
-  });
-  const [business, setBusiness] = useState<BusinessInfo | undefined>(() => {
-    const bootstrap = getBootstrappedData(widgetId);
-    return bootstrap?.kind === 'reviews'
-      ? (bootstrap.business ?? undefined)
-      : undefined;
-  });
-  const [reviews, setReviews] = useState<Review[] | undefined>(() => {
-    const bootstrap = getBootstrappedData(widgetId);
-    return bootstrap?.kind === 'reviews'
-      ? mapReviewsToClient(bootstrap.reviews ?? [])
-      : undefined;
-  });
+  const [acceptedBootstrap] = useState<BootstrapData | null>(() =>
+    bootstrap ?? getBootstrappedData(widgetId, apiOrigin)
+  );
+  const initial = acceptedBootstrap?.kind === 'reviews' ? acceptedBootstrap : null;
+  const [config, setConfig] = useState<WidgetConfig | null>(() =>
+    initial ? configFromDbRow(initial.config) : null
+  );
+  const [business, setBusiness] = useState<BusinessInfo | undefined>(() =>
+    initial?.business ?? undefined
+  );
+  const [reviews, setReviews] = useState<Review[] | undefined>(() =>
+    initial ? mapReviewsToClient(initial.reviews) : undefined
+  );
   const [failed, setFailed] = useState(false);
 
-  // Load config + business (deduped with the embed.tsx prefetch) so the badge
-  // can render; skip the failed flag when bootstrap already delivered data —
-  // a transient revalidation error must not blank a rendered widget.
+  // Legacy fallback: the bootstrap path is intentionally the only request
+  // path for a validated snapshot, so a normal mount never refetches config or
+  // reviews that were already delivered in data.js.
   useEffect(() => {
+    if (initial) return;
     let cancelled = false;
 
-    getWidgetConfig(widgetId, apiOrigin)
+    void getWidgetConfig(widgetId, apiOrigin)
       .then((row) => {
         if (cancelled) return;
         const nextConfig = configFromDbRow(row);
@@ -71,27 +66,24 @@ export function GoogleReviewsEmbed({
       })
       .catch((err) => {
         console.warn(`[custom-widgets] Failed to load widget ${widgetId}:`, err);
-        if (!cancelled && !getBootstrappedData(widgetId)) setFailed(true);
+        if (!cancelled) setFailed(true);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [widgetId, apiOrigin]);
+  }, [apiOrigin, initial, widgetId]);
 
-  // Load reviews in the background. The badge doesn't need them until the
-  // drawer opens, so this can complete after the initial paint.
   useEffect(() => {
+    if (initial) return;
     let cancelled = false;
 
-    getWidgetReviews(widgetId, apiOrigin)
+    void getWidgetReviews(widgetId, apiOrigin)
       .then((data) => {
         if (cancelled) return;
         const next = mapReviewsToClient(data.reviews);
         setReviews((current) =>
-          current && JSON.stringify(current) === JSON.stringify(next)
-            ? current
-            : next
+          current && JSON.stringify(current) === JSON.stringify(next) ? current : next
         );
       })
       .catch((err) => {
@@ -101,7 +93,7 @@ export function GoogleReviewsEmbed({
     return () => {
       cancelled = true;
     };
-  }, [widgetId, apiOrigin]);
+  }, [apiOrigin, initial, widgetId]);
 
   if (failed) return null;
   if (!config) return <WidgetSkeleton minHeight="60px" />;

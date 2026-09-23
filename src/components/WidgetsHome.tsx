@@ -11,7 +11,7 @@ import { configToDbRow } from '@/lib/widget-config';
 import type { BusinessInfo, Review } from '@/lib/reviews-data';
 import { Button, Input, Modal } from '@/components/ui';
 import { showConfirm } from '@/components/ui/ConfirmDialog';
-import { showToast } from '@/components/ui/Toast';
+import { showSaveResult, showToast } from '@/components/ui/Toast';
 import { BeforeAfterWidget } from './BeforeAfterWidget';
 import { FormWidget } from './FormWidget';
 import { GoogleReviewsWidget } from './GoogleReviewsWidget';
@@ -96,13 +96,10 @@ function buildEmbedCode(id: string) {
   return [
     '<!-- BuiltByShah Widget Embed -->',
     `<div data-bbs-embed="${id}"></div>`,
-    // data.js is intentionally a classic blocking script: it runs during
-    // parse so the bootstrap payload exists before the async widget.js
-    // bundle executes — that's what makes the first paint skip the skeleton
-    // (see spec amendment 6).
-    `<script src="${window.location.origin}/api/embeds/widget/${id}/data.js"></script>`,
-    // Always use the stable bundle URL. Hashed widget.<hash>.js URLs break
-    // (404) on client sites every time a new deployment replaces the build.
+    // Both scripts are async classic scripts. The runtime coordinates either
+    // execution order and mounts each placeholder as soon as its own data and
+    // renderer are ready; the stable URLs survive future deployments.
+    `<script async src="${window.location.origin}/api/embeds/widget/${id}/data.js"></script>`,
     `<script async src="${window.location.origin}/api/embeds/widget.js"></script>`,
     '<!-- End BuiltByShah Widget Embed -->',
   ].join('\n');
@@ -684,7 +681,7 @@ export function WidgetsHome() {
       // Refresh server props so a remount (close/reopen the modal) doesn't
       // re-initialize the list from the stale pre-duplicate payload.
       router.refresh();
-      showToast(`“${item.name}” duplicated`, 'success');
+      showSaveResult(row, `“${item.name}” duplicated`);
     } catch (err) {
       showToast(`Duplicate failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
     } finally {
@@ -704,7 +701,8 @@ export function WidgetsHome() {
           ? `/api/v1/${deleteTarget.type === 'form' ? 'form-widgets' : 'before-after-widgets'}/${deleteTarget.id}`
           : `/api/v1/widgets/${deleteTarget.id}`;
       const res = await fetch(url, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await res.text());
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
       if (deleteTarget.type === 'before-after') {
         setBeforeAfterItems((list) => list.filter((x) => x.id !== deleteTarget.id));
       } else if (deleteTarget.type === 'form') {
@@ -715,7 +713,13 @@ export function WidgetsHome() {
         setGoogleReviewsItems((list) => list.filter((x) => x.id !== deleteTarget.id));
       }
       router.refresh();
-      showToast(`“${deleteTarget.name}” deleted`, 'success');
+      let deleted: unknown = null;
+      try {
+        deleted = raw ? JSON.parse(raw) : null;
+      } catch {
+        deleted = null;
+      }
+      showSaveResult(deleted, `“${deleteTarget.name}” deleted`);
     } catch (err) {
       showToast(`Delete failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
     } finally {
@@ -744,8 +748,11 @@ export function WidgetsHome() {
           ...beforeAfterToDbRow(defaultBeforeAfterConfig),
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      const row = await res.json();
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
+      const row = JSON.parse(raw) as { id: string; liveCacheWarning?: string };
+      const warning = row.liveCacheWarning;
+      if (warning) showToast(warning, 'warning', 8000);
       close();
       router.push(`/widgets/before-after?id=${row.id}`);
     } catch (err) {
@@ -774,7 +781,7 @@ export function WidgetsHome() {
         ...list,
       ]);
       router.refresh();
-      showToast(`“${item.name}” duplicated`, 'success');
+      showSaveResult(row, `“${item.name}” duplicated`);
     } catch (err) {
       showToast(`Duplicate failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
     } finally {
@@ -794,8 +801,10 @@ export function WidgetsHome() {
           ...formToDbRow(defaultFormConfig),
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      const row = await res.json();
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw);
+      const row = JSON.parse(raw) as { id: string; liveCacheWarning?: string };
+      if (row.liveCacheWarning) showToast(row.liveCacheWarning, 'warning', 8000);
       close();
       router.push(`/widgets/form?id=${row.id}`);
     } catch (err) {
@@ -809,36 +818,6 @@ export function WidgetsHome() {
   const createGoogleReviews = (type: 'google-reviews' | 'google-reviews-carousel') => {
     close();
     router.push(`/widgets/${type}?new=1`);
-    // A widget needs a business — reuse the one from any existing widget.
-    /*
-    const source = googleReviewsItems[0] ?? carouselItems[0];
-    if (!source) {
-      showToast('No business found. Add a business in Supabase first.', 'error');
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await fetch('/api/v1/widgets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          business_id: source.businessId,
-          widget_type:
-            type === 'google-reviews-carousel' ? 'google_reviews_carousel' : 'google_reviews',
-          name: widgetTypeMeta[type].typeLabel,
-          ...configToDbRow(defaultWidgetConfig),
-          cached_reviews: source.reviews ?? [],
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const row = await res.json();
-      close();
-      router.push(`/widgets/${type}?id=${row.id}`);
-    } catch (err) {
-      showToast(`Create failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
-      setBusy(false);
-    }
-    */
   };
 
   const duplicateGoogleReviewsItem = async (
@@ -857,7 +836,6 @@ export function WidgetsHome() {
           widget_type: item.widgetType,
           name: `${item.name} (Copy)`,
           ...configToDbRow(item.config),
-          cached_reviews: item.reviews ?? [],
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -866,7 +844,7 @@ export function WidgetsHome() {
       setList((list) => [{ ...item, id: row.id, name: row.name }, ...list]);
       // Refresh server props so a remount doesn't re-initialize from stale data.
       router.refresh();
-      showToast(`“${item.name}” duplicated`, 'success');
+      showSaveResult(row, `“${item.name}” duplicated`);
     } catch (err) {
       showToast(`Duplicate failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
     } finally {

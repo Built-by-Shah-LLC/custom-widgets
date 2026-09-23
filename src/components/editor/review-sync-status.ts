@@ -9,6 +9,8 @@ interface ReviewSyncApiResult {
   reviewsStored?: number;
   targetReviews?: number;
   pagesFetched?: number;
+  totalReviews?: number | null;
+  stopReason?: string;
 }
 
 export function reviewSyncStatus(result: ReviewSyncApiResult): ReviewLoadStatus {
@@ -17,10 +19,18 @@ export function reviewSyncStatus(result: ReviewSyncApiResult): ReviewLoadStatus 
 
   if (result.complete === false) {
     const target = Number(result.targetReviews ?? 500);
-    const pages = Number(result.pagesFetched ?? 0);
+    const reported = Number(result.totalReviews ?? target);
+
+    if (result.stopReason === 'no_new_reviews') {
+      return {
+        state: 'partial',
+        message: `${stored} unique reviews stored. Google reports ${reported}; Scrape.do returned no additional accessible reviews after retries.`,
+      };
+    }
+
     return {
       state: 'partial',
-      message: `${fetched} of ${target} fetched; ${stored} stored. Scrape.do pagination stopped after ${pages} pages. Try Refresh again.`,
+      message: `${stored} unique reviews stored. Google reports ${reported}; Scrape.do pagination ended before the ${target}-review sync limit. Refresh may find more.`,
     };
   }
 

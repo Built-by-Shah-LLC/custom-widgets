@@ -5,7 +5,12 @@ import { BeforeAfterEmbed } from './components/BeforeAfterEmbed';
 import { FormEmbed } from './components/FormEmbed';
 import type { BootstrapData } from './lib/bootstrap';
 
-export type WidgetComponent = ComponentType<{ widgetId: string; apiOrigin?: string }>;
+export type WidgetComponent = ComponentType<{
+  widgetId: string;
+  apiOrigin?: string;
+  /** Captured, runtime-validated bootstrap snapshot for this mount. */
+  bootstrap?: BootstrapData;
+}>;
 
 /**
  * Maps widget IDs to { kind, component }. The kind tells the embed loader

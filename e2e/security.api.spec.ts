@@ -1,10 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { GARYS_WIDGET_IDS } from './helpers/shadow';
+import { assertE2EEnvironment } from '../src/lib/e2e-environment-guard';
+
+test.beforeAll(() => assertE2EEnvironment(process.env, 'mutation'));
 
 test.describe('auth + security API', () => {
   test.skip(
-    !process.env.SUPABASE_SERVICE_ROLE_KEY,
-    'SUPABASE_SERVICE_ROLE_KEY required for local API E2E'
+    !process.env.E2E_SUPABASE_SERVICE_ROLE_KEY,
+    'Dedicated E2E_SUPABASE_SERVICE_ROLE_KEY required for local API E2E'
   );
 
   test('unauthenticated browser is redirected to login', async ({ page }) => {

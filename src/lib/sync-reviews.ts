@@ -11,14 +11,17 @@ export interface SyncResult {
   totalReviews: number | null;
   averageRating: number | null;
   widgetsUpdated: number;
+  widgetIds: string[];
   reviewsFetched: number;
   targetReviews: number;
   complete: boolean;
   stopReason: string;
   requestsMade: number;
   pageDiagnostics: Array<{
+    pass: number;
     page: number;
     reviewCount: number;
+    newReviewCount: number;
     attempts: number;
     hasNextPageToken: boolean;
     identifier: 'data_id' | 'place_id';
@@ -185,6 +188,7 @@ export async function syncBusinessReviews(
     totalReviews,
     averageRating,
     widgetsUpdated: updatedWidgets?.length ?? 0,
+    widgetIds: (updatedWidgets ?? []).map((widget) => widget.id),
     reviewsFetched: rows.length,
     targetReviews,
     complete,

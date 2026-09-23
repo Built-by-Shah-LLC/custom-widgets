@@ -2,7 +2,6 @@
 // Reviews only carry Google's relative date string ("3 weeks ago"), so
 // newest/oldest sorting parses that into an approximate age in ms.
 
-import type { Review } from './reviews-data';
 import type { WidgetConfig } from './widget-config';
 
 const UNIT_MS: Record<string, number> = {
@@ -34,10 +33,45 @@ export function relativeTimeToMs(relativeTime: string): number {
   return Number.MAX_SAFE_INTEGER;
 }
 
+export type DisplayedReview = {
+  id: string;
+  rating: number;
+  relativeTime: string;
+  images?: string[] | null;
+};
+
+/** Same inputs the badge drawer and carousel use to choose visible reviews. */
+export type ReviewDisplayConfig = Pick<
+  WidgetConfig,
+  'minRating' | 'excludedReviewIds' | 'imageFiltering' | 'sortBy' | 'maxReviews'
+>;
+
+/**
+ * Filter, then sort, then keep maxReviews. Order matches the embed exactly:
+ * rating, exclusions, and image mode run before the slice, so a later filter
+ * cannot shrink a list that was cut too early.
+ */
+export function selectDisplayedReviews<T extends DisplayedReview>(
+  reviews: T[],
+  config: ReviewDisplayConfig
+): T[] {
+  const excluded = new Set(config.excludedReviewIds);
+  return reviews
+    .filter((review) => review.rating >= config.minRating)
+    .filter((review) => !excluded.has(review.id))
+    .filter((review) => {
+      if (config.imageFiltering === 'images_only') return (review.images?.length ?? 0) > 0;
+      if (config.imageFiltering === 'no_images') return (review.images?.length ?? 0) === 0;
+      return true;
+    })
+    .sort(reviewComparator(config))
+    .slice(0, config.maxReviews);
+}
+
 /** Comparator for the configured sort. 'most_relevant' keeps Google's order. */
 export function reviewComparator(
   config: Pick<WidgetConfig, 'sortBy' | 'imageFiltering'>
-): (a: Review, b: Review) => number {
+): (a: DisplayedReview, b: DisplayedReview) => number {
   return (a, b) => {
     if (config.imageFiltering === 'images_first') {
       // Boolean has-images grouping only — comparing counts would let a

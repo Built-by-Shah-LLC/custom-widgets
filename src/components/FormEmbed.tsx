@@ -3,57 +3,67 @@
 import { useEffect, useState } from 'react';
 import type { FormConfig } from '@/lib/form-config';
 import { formFromDbRow } from '@/lib/form-config';
-import { getBootstrappedData } from '@/lib/bootstrap';
+import { getBootstrappedData, type BootstrapData } from '@/lib/bootstrap';
 import { getFormWidget } from '@/lib/prefetch';
 import { FormWidget } from './FormWidget';
 import { WidgetSkeleton } from './WidgetSkeleton';
 
-/**
- * Embed loader for multi-step forms. With the data.js bootstrap snippet the
- * first React paint is the real widget (bootstrap config is the raw
- * form_widgets row, mapped with the same formFromDbRow used for the API
- * response); otherwise it paints a skeleton while the prefetch resolves. The
- * API is always re-fetched in the background to revalidate, but state only
- * updates when the payload actually differs — no spurious repaints.
- */
 export function FormEmbed({
   widgetId,
   apiOrigin = '',
+  bootstrap,
 }: {
   widgetId: string;
   apiOrigin?: string;
+  bootstrap?: BootstrapData;
 }) {
-  const [config, setConfig] = useState<FormConfig | null>(() => {
-    const bootstrap = getBootstrappedData(widgetId);
-    return bootstrap?.kind === 'form' ? formFromDbRow(bootstrap.config) : null;
-  });
+  const [acceptedBootstrap] = useState<BootstrapData | null>(() =>
+    bootstrap ?? getBootstrappedData(widgetId, apiOrigin)
+  );
+  const initial = acceptedBootstrap?.kind === 'form' ? acceptedBootstrap : null;
+  const [config, setConfig] = useState<FormConfig | null>(() =>
+    initial ? formFromDbRow(initial.config) : null
+  );
+  const [schemaFingerprint, setSchemaFingerprint] = useState<string | undefined>(
+    () => initial?.schemaFingerprint
+  );
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (initial) return;
     let cancelled = false;
-
-    getFormWidget(widgetId, apiOrigin)
+    void getFormWidget(widgetId, apiOrigin)
       .then((row) => {
         if (cancelled) return;
         const next = formFromDbRow(row);
         setConfig((current) =>
-          current && JSON.stringify(current) === JSON.stringify(next)
-            ? current
-            : next
+          current && JSON.stringify(current) === JSON.stringify(next) ? current : next
         );
+        if (typeof row.schemaFingerprint === 'string') {
+          setSchemaFingerprint(row.schemaFingerprint);
+        }
       })
       .catch((err) => {
         console.warn(`[custom-widgets] Failed to load widget ${widgetId}:`, err);
-        if (!cancelled && !getBootstrappedData(widgetId)) setFailed(true);
+        if (!cancelled) setFailed(true);
       });
-
     return () => {
       cancelled = true;
     };
-  }, [widgetId, apiOrigin]);
+  }, [apiOrigin, initial, widgetId]);
 
   if (failed) return null;
   if (!config) return <WidgetSkeleton minHeight="460px" maxWidth="560px" />;
 
-  return <FormWidget config={config} widgetId={widgetId} apiOrigin={apiOrigin} />;
+  return (
+    <FormWidget
+      config={config}
+      widgetId={widgetId}
+      apiOrigin={apiOrigin}
+      // Preserve the server-provided public schema fingerprint exactly. The
+      // submit route can reject a stale open form without recomputing from a
+      // mapped/defaulted client config.
+      schemaFingerprint={schemaFingerprint}
+    />
+  );
 }

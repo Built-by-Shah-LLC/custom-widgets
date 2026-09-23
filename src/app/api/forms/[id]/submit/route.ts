@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { supabase } from '@/lib/db';
 import {
+  AllowedDomainsUnavailableError,
   getAllowedDomains,
   getRequestOrigin,
   isOriginAllowed,
 } from '@/lib/domain-utils';
-import { NO_STORE } from '@/lib/cache-headers';
+import { NO_STORE_HEADERS } from '@/lib/cache-headers';
 import * as formConfig from '@/lib/form-config';
 
 export const dynamic = 'force-dynamic';
@@ -42,13 +43,18 @@ function rateLimited(ip: string): boolean {
 function corsHeaders(request: Request, allowed: boolean): Record<string, string> {
   const origin = getRequestOrigin(request);
   if (!allowed) {
-    return { 'Content-Type': 'application/json', 'Vary': 'Origin' };
+    return {
+      ...NO_STORE_HEADERS,
+      'Content-Type': 'application/json',
+      'Vary': 'Origin, Referer',
+    };
   }
   return {
+    ...NO_STORE_HEADERS,
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Vary': 'Origin',
+    'Vary': 'Origin, Referer',
   };
 }
 
@@ -66,7 +72,18 @@ function clampString(value: unknown, max: number): string {
  * delivering to a webhook / email per the row's settings.
  */
 export async function OPTIONS(request: Request) {
-  const allowedDomains = await getAllowedDomains();
+  let allowedDomains: string[];
+  try {
+    allowedDomains = await getAllowedDomains();
+  } catch (error) {
+    if (error instanceof AllowedDomainsUnavailableError) {
+      return NextResponse.json(
+        { error: 'Widget access policy unavailable' },
+        { status: 503, headers: corsHeaders(request, false) }
+      );
+    }
+    throw error;
+  }
   const origin = getRequestOrigin(request);
   const allowed = isOriginAllowed(origin, allowedDomains);
   return new NextResponse(null, {
@@ -90,7 +107,18 @@ export async function POST(
     );
   }
 
-  const allowedDomains = await getAllowedDomains();
+  let allowedDomains: string[];
+  try {
+    allowedDomains = await getAllowedDomains();
+  } catch (error) {
+    if (error instanceof AllowedDomainsUnavailableError) {
+      return NextResponse.json(
+        { error: 'Widget access policy unavailable' },
+        { status: 503, headers: corsHeaders(request, false) }
+      );
+    }
+    throw error;
+  }
   const origin = getRequestOrigin(request);
   if (origin && !isOriginAllowed(origin, allowedDomains)) {
     return NextResponse.json(
@@ -106,7 +134,11 @@ export async function POST(
     );
   }
 
-  let body: { answers?: unknown; meta?: Record<string, unknown> };
+  let body: {
+    answers?: unknown;
+    meta?: Record<string, unknown>;
+    schemaFingerprint?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -116,7 +148,15 @@ export async function POST(
     );
   }
 
-  if (body.answers === undefined || typeof body.answers !== 'object' || body.answers === null || Array.isArray(body.answers)) {
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
+    body.answers === undefined ||
+    typeof body.answers !== 'object' ||
+    body.answers === null ||
+    Array.isArray(body.answers)
+  ) {
     return NextResponse.json(
       { error: 'answers object is required' },
       { status: 400, headers: headers(true) }
@@ -139,6 +179,29 @@ export async function POST(
 
   const config = formConfig.formFromDbRow(row);
 
+  const suppliedFingerprint =
+    typeof body.schemaFingerprint === 'string' ? body.schemaFingerprint : null;
+  if (
+    suppliedFingerprint &&
+    suppliedFingerprint !== formConfig.formSchemaFingerprint(row)
+  ) {
+    return NextResponse.json(
+      {
+        error: 'FORM_SCHEMA_CHANGED',
+        message: 'This form changed while it was open. Please reload and try again.',
+      },
+      { status: 409, headers: headers(true) }
+    );
+  }
+
+  const answerShapeError = formConfig.validateAnswerShape(config, answers);
+  if (answerShapeError) {
+    return NextResponse.json(
+      { error: 'FORM_SCHEMA_CHANGED', message: answerShapeError },
+      { status: 409, headers: headers(true) }
+    );
+  }
+
   // Honeypot: silent success + drop when the invisible field got a value.
   const honeypot = clampString(
     (body.meta?.honeypot ?? answers['website'] ?? '') as unknown,
@@ -153,6 +216,7 @@ export async function POST(
   const allFields = config.steps.flatMap((s) => s.fields);
   const fieldErrors: Record<string, string> = {};
   const storedAnswers: Record<string, unknown> = {};
+  let missingRequiredField = false;
   let originDomain = '';
   try {
     originDomain = origin ? new URL(origin).hostname : '';
@@ -175,6 +239,13 @@ export async function POST(
       const error = formConfig.validateFieldValue(field, value);
       if (error) {
         fieldErrors[field.id] = error;
+        if (
+          !suppliedFingerprint &&
+          !(field.id in answers) &&
+          (field.validation?.required ?? field.required)
+        ) {
+          missingRequiredField = true;
+        }
         continue;
       }
 
@@ -189,6 +260,16 @@ export async function POST(
   }
 
   if (Object.keys(fieldErrors).length > 0) {
+    if (missingRequiredField) {
+      return NextResponse.json(
+        {
+          error: 'Validation failed',
+          message: 'This form changed while it was open. Please reload and try again.',
+          fields: fieldErrors,
+        },
+        { status: 400, headers: headers(true) }
+      );
+    }
     return NextResponse.json(
       { error: 'Validation failed', fields: fieldErrors },
       { status: 400, headers: headers(true) }
@@ -217,7 +298,7 @@ export async function POST(
   }
 
   // 2) Webhook delivery (best effort — never fail the submission for it).
-  if (config.submitWebhookUrl) {
+  if (config.submitWebhookUrl && process.env.DISABLE_EXTERNAL_DELIVERIES !== 'true') {
     void postWebhook(config.submitWebhookUrl, {
       formWidgetId: row.id,
       submittedAt,
@@ -227,7 +308,7 @@ export async function POST(
   }
 
   // 3) Email notification (best effort).
-  if (config.submitEmail) {
+  if (config.submitEmail && process.env.DISABLE_EXTERNAL_DELIVERIES !== 'true') {
     void sendSubmissionEmail(
       config.submitEmail,
       row.name,
