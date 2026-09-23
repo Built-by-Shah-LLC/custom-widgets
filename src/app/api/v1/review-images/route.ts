@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { after } from 'next/server';
 import {
   googleReviewImageIdentity,
   isReviewImageReviewId,
@@ -11,7 +12,13 @@ const ERROR_CACHE = 'no-store';
 const UNAVAILABLE_IMAGE_CACHE = 'public, max-age=60, s-maxage=300, stale-while-revalidate=60';
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const CONTEXT_LOOKUP_TIMEOUT_MS = 1_500;
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 120;
+const RATE_LIMIT_MAX_ENTRIES = 10_000;
 const LOG_PREFIX = '[review-image-proxy]';
+
+const rateLimitHits = new Map<string, { count: number; resetAt: number }>();
+let nextRateLimitPruneAt = 0;
 
 type ErrorLike = {
   name?: unknown;
@@ -26,6 +33,7 @@ type ReviewImageRequestContext = {
 };
 
 type UnknownRecord = Record<string, unknown>;
+type LogLevel = 'warn' | 'error';
 
 function sourceDetails(sourceUrl: URL) {
   const pathSegment = sourceUrl.pathname.split('/').filter(Boolean)[0] ?? null;
@@ -66,6 +74,43 @@ function reviewImageRequestContext(request: Request): ReviewImageRequestContext 
   };
 }
 
+function clientIp(request: Request): string {
+  return (
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip') ||
+    'unknown'
+  );
+}
+
+/**
+ * Per-instance protection for a public proxy endpoint. This deliberately
+ * permits a full review gallery to retry through the proxy during a Google
+ * outage; Vercel WAF rate limiting remains the cross-instance safeguard.
+ */
+function rateLimited(request: Request): boolean {
+  const now = Date.now();
+  if (now >= nextRateLimitPruneAt) {
+    for (const [ip, entry] of rateLimitHits) {
+      if (entry.resetAt <= now) rateLimitHits.delete(ip);
+    }
+    nextRateLimitPruneAt = now + RATE_WINDOW_MS;
+  }
+
+  const ip = clientIp(request);
+  const existing = rateLimitHits.get(ip);
+  if (!existing || existing.resetAt <= now) {
+    if (rateLimitHits.size >= RATE_LIMIT_MAX_ENTRIES) {
+      const oldestIp = rateLimitHits.keys().next().value;
+      if (oldestIp) rateLimitHits.delete(oldestIp);
+    }
+    rateLimitHits.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+
+  existing.count += 1;
+  return existing.count > RATE_MAX;
+}
+
 function widgetSurface(widgetType: string | null): 'badge' | 'carousel' | null {
   if (widgetType === 'google_reviews') return 'badge';
   if (widgetType === 'google_reviews_carousel') return 'carousel';
@@ -91,6 +136,13 @@ function widgetFields(widget: UnknownRecord) {
   };
 }
 
+function reviewFields(review: UnknownRecord) {
+  return {
+    reviewId: nonEmptyString(review.google_review_id),
+    reviewAuthorName: safeLogText(review.author_name, 160),
+  };
+}
+
 function reviewMatchesSource(review: UnknownRecord, sourceUrl: URL): boolean {
   const sourceIdentity = googleReviewImageIdentity(sourceUrl.href);
   if (!sourceIdentity || !Array.isArray(review.images)) return false;
@@ -100,9 +152,9 @@ function reviewMatchesSource(review: UnknownRecord, sourceUrl: URL): boolean {
 
 /**
  * The image endpoint is public, so query-string context is not trusted on its
- * own. On a failure only, verify the widget, review, and original Google
- * photo against the cached server-side widget payload before logging names or
- * IDs that identify a customer widget.
+ * own. On a failure only, resolve each supplied fragment against server data.
+ * Logs include every fragment that was independently verified, while their
+ * status fields make missing or mismatched fragments explicit.
  */
 async function resolveWidgetLogContext(
   sourceUrl: URL,
@@ -114,19 +166,17 @@ async function resolveWidgetLogContext(
   if (!isReviewImageWidgetId(context.widgetId)) {
     return { contextStatus: 'invalid_widget_id' };
   }
-  if (context.reviewId !== null && !isReviewImageReviewId(context.reviewId)) {
-    return { contextStatus: 'invalid_review_id' };
-  }
 
   try {
     // This import stays inside the failure-only path. Successful cached image
     // proxy requests never load the service-role client or query Supabase.
     const { supabase } = await import('@/lib/db');
+    const lookupSignal = AbortSignal.timeout(CONTEXT_LOOKUP_TIMEOUT_MS);
     const { data, error } = await supabase
       .from('widgets')
-      .select('id, name, widget_type, business_id, cached_reviews, businesses(name)')
+      .select('id, name, widget_type, business_id, businesses(name)')
       .eq('id', context.widgetId)
-      .abortSignal(AbortSignal.timeout(CONTEXT_LOOKUP_TIMEOUT_MS))
+      .abortSignal(lookupSignal)
       .maybeSingle();
 
     if (error) {
@@ -143,36 +193,75 @@ async function resolveWidgetLogContext(
     if (fields.widgetId !== context.widgetId) {
       return { contextStatus: 'widget_lookup_mismatch' };
     }
-    if (!fields.widgetSurface) {
-      return { contextStatus: 'unsupported_widget_type' };
-    }
     if (!context.reviewId) {
       return {
-        contextStatus: 'widget_verified_review_not_provided',
+        contextStatus: 'widget_verified',
+        reviewStatus: 'not_provided',
+        sourceStatus: 'not_checked',
+        ...fields,
+      };
+    }
+    if (!isReviewImageReviewId(context.reviewId)) {
+      return {
+        contextStatus: 'widget_verified',
+        reviewStatus: 'invalid',
+        sourceStatus: 'not_checked',
         ...fields,
       };
     }
 
-    const reviews = Array.isArray(widget.cached_reviews) ? widget.cached_reviews : [];
-    const review = reviews
-      .map(asRecord)
-      .find((candidate) =>
-        candidate !== null
-        && (nonEmptyString(candidate.id) ?? nonEmptyString(candidate.google_review_id)) === context.reviewId
-      );
+    const { data: reviewData, error: reviewError } = await supabase
+      .from('reviews')
+      .select('business_id, google_review_id, author_name, images')
+      .eq('google_review_id', context.reviewId)
+      .abortSignal(lookupSignal)
+      .maybeSingle();
 
-    if (!review) {
-      return { contextStatus: 'review_not_found', ...fields };
+    if (reviewError) {
+      return {
+        contextStatus: 'widget_verified',
+        reviewStatus: 'lookup_failed',
+        sourceStatus: 'not_checked',
+        reviewLookupCode: safeLogText(reviewError.code, 120),
+        ...fields,
+      };
     }
+
+    const review = asRecord(reviewData);
+    if (!review) {
+      return {
+        contextStatus: 'widget_verified',
+        reviewStatus: 'not_found',
+        sourceStatus: 'not_checked',
+        ...fields,
+      };
+    }
+    if (!fields.businessId || nonEmptyString(review.business_id) !== fields.businessId) {
+      return {
+        contextStatus: 'widget_verified',
+        reviewStatus: 'business_mismatch',
+        sourceStatus: 'not_checked',
+        ...fields,
+      };
+    }
+
+    const verifiedReviewFields = reviewFields(review);
     if (!reviewMatchesSource(review, sourceUrl)) {
-      return { contextStatus: 'source_not_matched', ...fields };
+      return {
+        contextStatus: 'review_verified',
+        reviewStatus: 'verified',
+        sourceStatus: 'mismatch',
+        ...fields,
+        ...verifiedReviewFields,
+      };
     }
 
     return {
       contextStatus: 'verified',
+      reviewStatus: 'verified',
+      sourceStatus: 'verified',
       ...fields,
-      reviewId: context.reviewId,
-      reviewAuthorName: safeLogText(review.authorName ?? review.author_name, 160),
+      ...verifiedReviewFields,
     };
   } catch (error) {
     return {
@@ -183,6 +272,25 @@ async function resolveWidgetLogContext(
       ),
     };
   }
+}
+
+function scheduleFailureLog(
+  level: LogLevel,
+  sourceUrl: URL,
+  context: ReviewImageRequestContext,
+  logContext: UnknownRecord,
+) {
+  // Diagnostic enrichment is intentionally outside the image response's
+  // critical path. `after()` keeps Vercel's function alive for the log work.
+  after(async () => {
+    const widgetContext = await resolveWidgetLogContext(sourceUrl, context);
+    const message = { ...logContext, ...widgetContext };
+    if (level === 'warn') {
+      console.warn(LOG_PREFIX, message);
+    } else {
+      console.error(LOG_PREFIX, message);
+    }
+  });
 }
 
 function errorDetails(error: unknown) {
@@ -235,6 +343,16 @@ function gatewayErrorResponse(requestId: string) {
   });
 }
 
+function rateLimitedResponse() {
+  return new Response('Too many review image requests', {
+    status: 429,
+    headers: {
+      'Cache-Control': ERROR_CACHE,
+      'Retry-After': '60',
+    },
+  });
+}
+
 export async function GET(request: Request) {
   const requestId = randomUUID();
   const startedAt = Date.now();
@@ -249,6 +367,9 @@ export async function GET(request: Request) {
     });
   }
 
+  if (rateLimited(request)) return rateLimitedResponse();
+  const requestContext = reviewImageRequestContext(request);
+
   let upstream: Response;
   try {
     upstream = await fetch(sourceUrl, {
@@ -261,30 +382,26 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    const widgetContext = await resolveWidgetLogContext(
+    scheduleFailureLog(
+      'error',
       sourceUrl,
-      reviewImageRequestContext(request),
+      requestContext,
+      {
+        event: 'review_image_proxy.upstream_fetch_failed',
+        requestId,
+        vercelRequestId: request.headers.get('x-vercel-id'),
+        elapsedMs: Date.now() - startedAt,
+        timeoutMs: UPSTREAM_TIMEOUT_MS,
+        ...sourceDetails(sourceUrl),
+        error: errorDetails(error),
+      },
     );
-    console.error(LOG_PREFIX, {
-      event: 'review_image_proxy.upstream_fetch_failed',
-      requestId,
-      vercelRequestId: request.headers.get('x-vercel-id'),
-      elapsedMs: Date.now() - startedAt,
-      timeoutMs: UPSTREAM_TIMEOUT_MS,
-      ...sourceDetails(sourceUrl),
-      ...widgetContext,
-      error: errorDetails(error),
-    });
 
     return gatewayErrorResponse(requestId);
   }
 
   const contentType = upstream.headers.get('content-type') ?? '';
   if (!upstream.ok || !contentType.toLowerCase().startsWith('image/') || !upstream.body) {
-    const widgetContext = await resolveWidgetLogContext(
-      sourceUrl,
-      reviewImageRequestContext(request),
-    );
     const sourceUnavailable = [401, 403, 404, 410].includes(upstream.status);
     const logContext = {
       event: sourceUnavailable
@@ -294,7 +411,6 @@ export async function GET(request: Request) {
       vercelRequestId: request.headers.get('x-vercel-id'),
       elapsedMs: Date.now() - startedAt,
       ...sourceDetails(sourceUrl),
-      ...widgetContext,
       upstreamStatus: upstream.status,
       upstreamContentType: contentType || null,
       upstreamContentLength: upstream.headers.get('content-length'),
@@ -306,11 +422,11 @@ export async function GET(request: Request) {
       // A Google 403/404 normally means an expired or restricted review-photo
       // URL. It is not a failure of this service, and a short cache prevents
       // every widget render from retrying the same unusable image.
-      console.warn(LOG_PREFIX, logContext);
+      scheduleFailureLog('warn', sourceUrl, requestContext, logContext);
       return unavailableResponse();
     }
 
-    console.error(LOG_PREFIX, logContext);
+    scheduleFailureLog('error', sourceUrl, requestContext, logContext);
     return gatewayErrorResponse(requestId);
   }
 

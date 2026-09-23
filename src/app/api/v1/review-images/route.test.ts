@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { supabaseFrom } = vi.hoisted(() => ({
+const { afterCallbacks, supabaseFrom } = vi.hoisted(() => ({
+  afterCallbacks: [] as Array<() => void | Promise<void>>,
   supabaseFrom: vi.fn(),
+}));
+
+vi.mock('next/server', () => ({
+  after: (callback: () => void | Promise<void>) => {
+    afterCallbacks.push(callback);
+  },
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -18,16 +25,43 @@ const WIDGET_ID = '7f3a9c2e-4b1d-4e8f-9a6c-2d5e8f1a3b7c';
 const BUSINESS_ID = '3f3a9c2e-4b1d-4e8f-9a6c-2d5e8f1a3b7c';
 const REVIEW_ID = 'google-review-123';
 
-function mockWidgetLookup(data: unknown, error: { code?: string } | null = null) {
+function mockLookup(data: unknown, error: { code?: string } | null = null) {
   const maybeSingle = vi.fn().mockResolvedValue({ data, error });
   const abortSignal = vi.fn().mockReturnValue({ maybeSingle });
   const eq = vi.fn().mockReturnValue({ abortSignal });
   const select = vi.fn().mockReturnValue({ eq });
-  supabaseFrom.mockReturnValue({ select });
   return { select, eq, abortSignal, maybeSingle };
 }
 
+function mockLogLookups({
+  widget,
+  review = null,
+  widgetError = null,
+  reviewError = null,
+}: {
+  widget: unknown;
+  review?: unknown;
+  widgetError?: { code?: string } | null;
+  reviewError?: { code?: string } | null;
+}) {
+  const widgetQuery = mockLookup(widget, widgetError);
+  const reviewQuery = mockLookup(review, reviewError);
+
+  supabaseFrom.mockImplementation((table: string) => {
+    if (table === 'widgets') return { select: widgetQuery.select };
+    if (table === 'reviews') return { select: reviewQuery.select };
+    throw new Error(`Unexpected Supabase table: ${table}`);
+  });
+
+  return { widgetQuery, reviewQuery };
+}
+
+async function flushAfterCallbacks() {
+  await Promise.all(afterCallbacks.splice(0).map((callback) => callback()));
+}
+
 afterEach(() => {
+  afterCallbacks.splice(0);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   supabaseFrom.mockReset();
@@ -77,6 +111,7 @@ describe('review image proxy', () => {
 
     expect(response.status).toBe(404);
     expect(response.headers.get('cache-control')).toContain('s-maxage=300');
+    await flushAfterCallbacks();
     expect(warning).toHaveBeenCalledWith(
       '[review-image-proxy]',
       expect.objectContaining({
@@ -91,17 +126,20 @@ describe('review image proxy', () => {
 
   it('logs verified widget, surface, business, and review context for an unavailable image', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const query = mockWidgetLookup({
-      id: WIDGET_ID,
-      name: 'Acme review carousel',
-      widget_type: 'google_reviews_carousel',
-      business_id: BUSINESS_ID,
-      businesses: { name: 'Acme Auto' },
-      cached_reviews: [{
-        id: REVIEW_ID,
-        authorName: 'Taylor Reviewer',
+    const { reviewQuery, widgetQuery } = mockLogLookups({
+      widget: {
+        id: WIDGET_ID,
+        name: 'Acme review carousel',
+        widget_type: 'google_reviews_carousel',
+        business_id: BUSINESS_ID,
+        businesses: { name: 'Acme Auto' },
+      },
+      review: {
+        business_id: BUSINESS_ID,
+        google_review_id: REVIEW_ID,
+        author_name: 'Taylor Reviewer',
         images: [STORED_GOOGLE_IMAGE],
-      }],
+      },
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', {
       status: 403,
@@ -115,21 +153,193 @@ describe('review image proxy', () => {
     );
 
     expect(response.status).toBe(404);
-    expect(supabaseFrom).toHaveBeenCalledWith('widgets');
-    expect(query.select).toHaveBeenCalledWith(
-      'id, name, widget_type, business_id, cached_reviews, businesses(name)'
+    expect(warning).not.toHaveBeenCalled();
+    await flushAfterCallbacks();
+    expect(supabaseFrom).toHaveBeenNthCalledWith(1, 'widgets');
+    expect(supabaseFrom).toHaveBeenNthCalledWith(2, 'reviews');
+    expect(widgetQuery.select).toHaveBeenCalledWith(
+      'id, name, widget_type, business_id, businesses(name)'
     );
-    expect(query.eq).toHaveBeenCalledWith('id', WIDGET_ID);
+    expect(widgetQuery.eq).toHaveBeenCalledWith('id', WIDGET_ID);
+    expect(reviewQuery.select).toHaveBeenCalledWith(
+      'business_id, google_review_id, author_name, images'
+    );
+    expect(reviewQuery.eq).toHaveBeenCalledWith('google_review_id', REVIEW_ID);
     expect(warning).toHaveBeenCalledWith(
       '[review-image-proxy]',
       expect.objectContaining({
         contextStatus: 'verified',
+        reviewStatus: 'verified',
+        sourceStatus: 'verified',
         widgetId: WIDGET_ID,
         widgetName: 'Acme review carousel',
         widgetType: 'google_reviews_carousel',
         widgetSurface: 'carousel',
         businessId: BUSINESS_ID,
         businessName: 'Acme Auto',
+        reviewId: REVIEW_ID,
+        reviewAuthorName: 'Taylor Reviewer',
+      })
+    );
+  });
+
+  it('keeps verified widget context when the review ID is absent', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { reviewQuery, widgetQuery } = mockLogLookups({
+      widget: {
+        id: WIDGET_ID,
+        name: 'Acme review badge',
+        widget_type: 'google_reviews',
+        business_id: BUSINESS_ID,
+        businesses: { name: 'Acme Auto' },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', {
+      status: 403,
+      headers: { 'Content-Type': 'text/html' },
+    })));
+
+    const response = await GET(
+      new Request(
+        `https://widgets.example.com/api/v1/review-images?url=${encodeURIComponent(GOOGLE_IMAGE)}&widgetId=${WIDGET_ID}`
+      )
+    );
+
+    expect(response.status).toBe(404);
+    await flushAfterCallbacks();
+    expect(widgetQuery.select).toHaveBeenCalled();
+    expect(reviewQuery.select).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      '[review-image-proxy]',
+      expect.objectContaining({
+        contextStatus: 'widget_verified',
+        reviewStatus: 'not_provided',
+        sourceStatus: 'not_checked',
+        widgetId: WIDGET_ID,
+        widgetName: 'Acme review badge',
+        widgetSurface: 'badge',
+        businessName: 'Acme Auto',
+      })
+    );
+  });
+
+  it('keeps verified widget context when an untrusted review ID is invalid', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { reviewQuery, widgetQuery } = mockLogLookups({
+      widget: {
+        id: WIDGET_ID,
+        name: 'Acme review badge',
+        widget_type: 'google_reviews',
+        business_id: BUSINESS_ID,
+        businesses: { name: 'Acme Auto' },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', {
+      status: 403,
+      headers: { 'Content-Type': 'text/html' },
+    })));
+
+    const response = await GET(
+      new Request(
+        `https://widgets.example.com/api/v1/review-images?url=${encodeURIComponent(GOOGLE_IMAGE)}&widgetId=${WIDGET_ID}&reviewId=${encodeURIComponent('invalid\nreview')}`
+      )
+    );
+
+    expect(response.status).toBe(404);
+    await flushAfterCallbacks();
+    expect(widgetQuery.select).toHaveBeenCalled();
+    expect(reviewQuery.select).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      '[review-image-proxy]',
+      expect.objectContaining({
+        contextStatus: 'widget_verified',
+        reviewStatus: 'invalid',
+        sourceStatus: 'not_checked',
+        widgetId: WIDGET_ID,
+        widgetName: 'Acme review badge',
+      })
+    );
+  });
+
+  it('does not attach review details when the review belongs to a different business', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockLogLookups({
+      widget: {
+        id: WIDGET_ID,
+        name: 'Acme review carousel',
+        widget_type: 'google_reviews_carousel',
+        business_id: BUSINESS_ID,
+        businesses: { name: 'Acme Auto' },
+      },
+      review: {
+        business_id: '4f3a9c2e-4b1d-4e8f-9a6c-2d5e8f1a3b7c',
+        google_review_id: REVIEW_ID,
+        author_name: 'Another Customer',
+        images: [STORED_GOOGLE_IMAGE],
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', {
+      status: 403,
+      headers: { 'Content-Type': 'text/html' },
+    })));
+
+    const response = await GET(
+      new Request(
+        `https://widgets.example.com/api/v1/review-images?url=${encodeURIComponent(GOOGLE_IMAGE)}&widgetId=${WIDGET_ID}&reviewId=${REVIEW_ID}`
+      )
+    );
+
+    expect(response.status).toBe(404);
+    await flushAfterCallbacks();
+    const logContext = warning.mock.calls[0][1];
+    expect(logContext).toEqual(expect.objectContaining({
+      contextStatus: 'widget_verified',
+      reviewStatus: 'business_mismatch',
+      sourceStatus: 'not_checked',
+      widgetId: WIDGET_ID,
+      businessId: BUSINESS_ID,
+    }));
+    expect(logContext).not.toHaveProperty('reviewId');
+    expect(logContext).not.toHaveProperty('reviewAuthorName');
+  });
+
+  it('records review context when its source does not match the requested image', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockLogLookups({
+      widget: {
+        id: WIDGET_ID,
+        name: 'Acme review carousel',
+        widget_type: 'google_reviews_carousel',
+        business_id: BUSINESS_ID,
+        businesses: { name: 'Acme Auto' },
+      },
+      review: {
+        business_id: BUSINESS_ID,
+        google_review_id: REVIEW_ID,
+        author_name: 'Taylor Reviewer',
+        images: ['https://lh3.googleusercontent.com/grass-cs/different=s0'],
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', {
+      status: 403,
+      headers: { 'Content-Type': 'text/html' },
+    })));
+
+    const response = await GET(
+      new Request(
+        `https://widgets.example.com/api/v1/review-images?url=${encodeURIComponent(GOOGLE_IMAGE)}&widgetId=${WIDGET_ID}&reviewId=${REVIEW_ID}`
+      )
+    );
+
+    expect(response.status).toBe(404);
+    await flushAfterCallbacks();
+    expect(warning).toHaveBeenCalledWith(
+      '[review-image-proxy]',
+      expect.objectContaining({
+        contextStatus: 'review_verified',
+        reviewStatus: 'verified',
+        sourceStatus: 'mismatch',
+        widgetId: WIDGET_ID,
         reviewId: REVIEW_ID,
         reviewAuthorName: 'Taylor Reviewer',
       })
@@ -152,6 +362,7 @@ describe('review image proxy', () => {
     expect(response.status).toBe(502);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/i);
+    await flushAfterCallbacks();
     expect(log).toHaveBeenCalledWith(
       '[review-image-proxy]',
       expect.objectContaining({
@@ -182,6 +393,7 @@ describe('review image proxy', () => {
 
     expect(response.status).toBe(502);
     expect(response.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/i);
+    await flushAfterCallbacks();
     expect(log).toHaveBeenCalledWith(
       '[review-image-proxy]',
       expect.objectContaining({
@@ -190,5 +402,26 @@ describe('review image proxy', () => {
         upstreamContentType: 'text/html',
       })
     );
+  });
+
+  it('limits a single client after 120 valid proxy requests in one minute', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('image-bytes', {
+      headers: { 'Content-Type': 'image/jpeg' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const requestUrl =
+      `https://widgets.example.com/api/v1/review-images?url=${encodeURIComponent(GOOGLE_IMAGE)}`;
+    const requestHeaders = { 'x-forwarded-for': '198.51.100.42' };
+
+    for (let requestNumber = 0; requestNumber < 120; requestNumber += 1) {
+      const response = await GET(new Request(requestUrl, { headers: requestHeaders }));
+      expect(response.status).toBe(200);
+    }
+
+    const limited = await GET(new Request(requestUrl, { headers: requestHeaders }));
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('cache-control')).toBe('no-store');
+    expect(limited.headers.get('retry-after')).toBe('60');
+    expect(fetchMock).toHaveBeenCalledTimes(120);
   });
 });
