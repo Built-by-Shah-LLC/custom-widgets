@@ -149,7 +149,12 @@ test.describe('isolated widget loader', () => {
       expect(await page.evaluate(() => document.readyState)).toBe('loading');
       expect(fixture.dataRequests.get(IDS.static)).toBe(1);
       expect(fixture.bundleRequests.count).toBe(1);
-      expect(fixture.allRequests.filter((url) => url.includes('/api/v1/'))).toHaveLength(0);
+      // The load-timing beacon (POST /api/v1/widget-timing) is intentional
+      // telemetry, not a legacy data fetch — exclude it from this assertion.
+      const legacyDataRequests = fixture.allRequests.filter(
+        (url) => url.includes('/api/v1/') && !url.includes('/api/v1/widget-timing')
+      );
+      expect(legacyDataRequests).toHaveLength(0);
     } finally {
       fixture.releaseHold();
     }
