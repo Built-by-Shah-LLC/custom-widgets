@@ -66,11 +66,12 @@ npx tsx scripts/sync-all-reviews.ts
 npx tsx scripts/sync-all-reviews.ts --skip-file synced.json
 ```
 
-> **Quota warning:** every sync consumes scrape.do credits (roughly one credit
-> per page fetched; the sync fetches up to 40 reviews = ~4 pages per business).
-> Do NOT run `sync-all-reviews.ts` more than once a day, and check remaining
-> quota on the scrape.do dashboard before a large batch. Report usage to Ali
-> after bulk syncs.
+> **Quota warning:** each successful Scrape.do Maps Reviews request costs 10
+> credits. This app requests 20 reviews per page, so its normal 40-review sync
+> costs up to 20 credits per business; a 500-review refresh costs up to 250
+> credits before retries. Do NOT run `sync-all-reviews.ts` more than once a
+> day, and check remaining quota on the Scrape.do dashboard before a large
+> batch. Report usage to Ali after bulk syncs.
 
 ---
 

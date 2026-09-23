@@ -280,6 +280,7 @@ export function CarouselEditor({
           <div className="w-full">
             <ScaledCarouselPreview
               key={selectedId}
+              widgetId={selectedId}
               config={config}
               business={business}
               reviews={reviews}

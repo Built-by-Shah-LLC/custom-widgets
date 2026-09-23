@@ -44,6 +44,7 @@ export function GoogleReviewsCarousel({
   reviews = [],
   disableResponsive = false,
   apiOrigin = '',
+  widgetId,
 }: {
   config: WidgetConfig;
   business?: BusinessInfo;
@@ -51,9 +52,10 @@ export function GoogleReviewsCarousel({
   /** Skip the per-slide breakpoints — previews always show the configured count. */
   disableResponsive?: boolean;
   apiOrigin?: string;
+  widgetId?: string;
 }) {
   const [page, setPage] = useState(0);
-  const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
+  const [lightbox, setLightbox] = useState<{ images: string[]; index: number; reviewId: string } | null>(null);
   const slideRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [viewportWidth, setViewportWidth] = useState<number | null>(null);
@@ -257,8 +259,10 @@ export function GoogleReviewsCarousel({
               src={googlePhotoVariant(src, avatarSize * 2)}
               size={avatarSize}
               borderRadius={6}
-              onClick={() => setLightbox({ images: review.images!, index: i })}
+              onClick={() => setLightbox({ images: review.images!, index: i, reviewId: review.id })}
               apiOrigin={apiOrigin}
+              widgetId={widgetId}
+              reviewId={review.id}
               loadingStrategy={loadImagesEagerly ? 'eager' : 'lazy'}
             />
           ))}
@@ -311,7 +315,16 @@ export function GoogleReviewsCarousel({
         .cw-carousel-text::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.3); border-radius: 9999px; }
       `}</style>
 
-      {lightbox && <ReviewLightbox images={lightbox.images} initialIndex={lightbox.index} onClose={() => setLightbox(null)} apiOrigin={apiOrigin} />}
+      {lightbox && (
+        <ReviewLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+          apiOrigin={apiOrigin}
+          widgetId={widgetId}
+          reviewId={lightbox.reviewId}
+        />
+      )}
 
       {/* Header */}
       {(config.drawerShowBusinessInfo || config.carouselShowOverallRating) && business && (

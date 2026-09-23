@@ -6,6 +6,7 @@ import type { WidgetConfig } from '@/lib/widget-config';
 import { GoogleReviewsCarousel } from './GoogleReviewsCarousel';
 
 interface ScaledCarouselPreviewProps {
+  widgetId?: string;
   config: WidgetConfig;
   business?: BusinessInfo;
   reviews: Review[];
@@ -20,6 +21,7 @@ interface ScaledCarouselPreviewProps {
  * preserved.
  */
 export function ScaledCarouselPreview({
+  widgetId,
   config,
   business,
   reviews,
@@ -80,6 +82,7 @@ export function ScaledCarouselPreview({
         }}
       >
         <GoogleReviewsCarousel
+          widgetId={widgetId}
           config={{
             ...config,
             // Give scrollable review text extra height in preview so cards

@@ -153,6 +153,7 @@ function PopupStar({ filled, color, size }: { filled: boolean; color: string; si
 interface GoogleReviewsPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  widgetId?: string;
   config?: WidgetConfig;
   business?: BusinessInfo;
   reviews?: Review[];
@@ -164,13 +165,14 @@ const EMPTY_REVIEWS: Review[] = [];
 export function GoogleReviewsPanel({
   isOpen,
   onClose,
+  widgetId,
   config = defaultWidgetConfig,
   business,
   reviews,
   apiOrigin = '',
 }: GoogleReviewsPanelProps) {
   const [visibleCount, setVisibleCount] = useState(config.drawerReviewsPerPage);
-  const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
+  const [lightbox, setLightbox] = useState<{ images: string[]; index: number; reviewId: string } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -255,7 +257,16 @@ export function GoogleReviewsPanel({
 
   return (
     <>
-      {lightbox && <ReviewLightbox images={lightbox.images} initialIndex={lightbox.index} onClose={() => setLightbox(null)} apiOrigin={apiOrigin} />}
+      {lightbox && (
+        <ReviewLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+          apiOrigin={apiOrigin}
+          widgetId={widgetId}
+          reviewId={lightbox.reviewId}
+        />
+      )}
 
       {isOpen && (
         <div
@@ -491,8 +502,10 @@ export function GoogleReviewsPanel({
                               src={googlePhotoVariant(src, reviewImageSize * 2)}
                               size={reviewImageSize}
                               borderRadius={8}
-                              onClick={() => setLightbox({ images: review.images!, index: i })}
+                              onClick={() => setLightbox({ images: review.images!, index: i, reviewId: review.id })}
                               apiOrigin={apiOrigin}
+                              widgetId={widgetId}
+                              reviewId={review.id}
                             />
                           ))}
                         </div>

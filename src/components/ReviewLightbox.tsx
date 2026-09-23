@@ -4,11 +4,20 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { reviewImageProxyUrl } from '@/lib/review-images';
 
-export function ReviewLightbox({ images, initialIndex, onClose, apiOrigin = '' }: {
+export function ReviewLightbox({
+  images,
+  initialIndex,
+  onClose,
+  apiOrigin = '',
+  widgetId,
+  reviewId,
+}: {
   images: string[];
   initialIndex: number;
   onClose: () => void;
   apiOrigin?: string;
+  widgetId?: string;
+  reviewId?: string;
 }) {
   const [index, setIndex] = useState(initialIndex);
   const [loading, setLoading] = useState(true);
@@ -86,7 +95,7 @@ export function ReviewLightbox({ images, initialIndex, onClose, apiOrigin = '' }
             referrerPolicy="no-referrer"
             onLoad={() => setLoading(false)}
             onError={() => {
-              const fallback = reviewImageProxyUrl(images[index], apiOrigin);
+              const fallback = reviewImageProxyUrl(images[index], apiOrigin, { widgetId, reviewId });
               if (displaySrc !== fallback) {
                 setDisplaySrc(fallback);
                 return;
@@ -131,6 +140,8 @@ export function ReviewPhoto({
   borderRadius,
   onClick,
   apiOrigin = '',
+  widgetId,
+  reviewId,
   loadingStrategy = 'lazy',
 }: {
   src: string;
@@ -138,6 +149,8 @@ export function ReviewPhoto({
   borderRadius: number;
   onClick: () => void;
   apiOrigin?: string;
+  widgetId?: string;
+  reviewId?: string;
   loadingStrategy?: 'eager' | 'lazy';
 }) {
   const [loading, setLoading] = useState(true);
@@ -159,7 +172,7 @@ export function ReviewPhoto({
       {loading && <PhotoSpinner size={Math.min(28, Math.max(18, size * 0.35))} dark />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img ref={handleImageElement} src={displaySrc} alt="" loading={loadingStrategy} decoding="async" referrerPolicy="no-referrer" onLoad={() => setLoading(false)} onError={() => {
-        const fallback = reviewImageProxyUrl(src, apiOrigin);
+        const fallback = reviewImageProxyUrl(src, apiOrigin, { widgetId, reviewId });
         if (displaySrc !== fallback) {
           setDisplaySrc(fallback);
           return;

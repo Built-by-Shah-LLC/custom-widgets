@@ -88,6 +88,7 @@ export function GoogleReviewsCarouselEmbed({
 
   return (
     <GoogleReviewsCarousel
+      widgetId={widgetId}
       config={config}
       business={business}
       reviews={reviews}

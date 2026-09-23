@@ -331,6 +331,7 @@ function CarouselThumbnail({ item }: { item: GoogleReviewsItem }) {
           }}
         >
           <GoogleReviewsCarousel
+            widgetId={item.id}
             config={item.config}
             business={item.business}
             reviews={item.reviews}

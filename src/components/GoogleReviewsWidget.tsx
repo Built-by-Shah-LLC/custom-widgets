@@ -311,6 +311,7 @@ export function GoogleReviewsWidget({
         <GoogleReviewsPanel
           isOpen={isOpen}
           onClose={() => setIsOpen(false)}
+          widgetId={widgetId}
           config={config}
           business={businessInfo}
           reviews={reviews}
