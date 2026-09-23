@@ -18,8 +18,10 @@ export interface SyncResult {
   stopReason: string;
   requestsMade: number;
   pageDiagnostics: Array<{
+    pass: number;
     page: number;
     reviewCount: number;
+    newReviewCount: number;
     attempts: number;
     hasNextPageToken: boolean;
     identifier: 'data_id' | 'place_id';

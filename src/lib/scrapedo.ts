@@ -41,15 +41,22 @@ const ENDPOINT = 'https://api.scrape.do/plugin/google/maps/reviews';
 const PAGE_SIZE = 20;
 const DEFAULT_PREMATURE_END_RETRIES = 2;
 const DEFAULT_PREMATURE_END_RETRY_DELAY_MS = 500;
+const DEFAULT_MAX_PAGINATION_PASSES = 3;
+const DEFAULT_MAX_STAGNANT_PASSES = 2;
 
 export type ScrapeDoStopReason =
   | 'target_reached'
   | 'empty_page'
-  | 'missing_next_page_token';
+  | 'missing_next_page_token'
+  | 'page_limit_reached'
+  | 'repeated_page_token'
+  | 'no_new_reviews';
 
 export interface ScrapeDoPageDiagnostic {
+  pass: number;
   page: number;
   reviewCount: number;
+  newReviewCount: number;
   attempts: number;
   hasNextPageToken: boolean;
   identifier: 'data_id' | 'place_id';
@@ -60,6 +67,8 @@ export interface ScrapeDoFetchOptions {
   expectedReviewCount?: number | null;
   prematureEndRetries?: number;
   prematureEndRetryDelayMs?: number;
+  maxPaginationPasses?: number;
+  maxStagnantPasses?: number;
 }
 
 export interface ScrapeDoReviewsResult {
@@ -121,6 +130,15 @@ function reviewTarget(
     : maxReviews;
 }
 
+function reviewIdentity(review: ScrapeDoReview) {
+  return review.review_id ?? [
+    review.user?.name ?? 'anon',
+    review.date ?? '',
+    review.rating ?? '',
+    review.snippet ?? '',
+  ].join('|');
+}
+
 export async function fetchAllScrapeDoReviews(
   placeId: string,
   token: string,
@@ -128,8 +146,7 @@ export async function fetchAllScrapeDoReviews(
   sortBy?: ScrapeDoReviewSort,
   options: ScrapeDoFetchOptions = {}
 ): Promise<ScrapeDoReviewsResult> {
-  const all: ScrapeDoReview[] = [];
-  let pageToken: string | undefined;
+  const all = new Map<string, ScrapeDoReview>();
   let fetchedPages = 0;
   let requestsMade = 0;
   let placeInfo: ScrapeDoPlaceInfo | undefined;
@@ -144,86 +161,156 @@ export async function fetchAllScrapeDoReviews(
     0,
     options.prematureEndRetryDelayMs ?? DEFAULT_PREMATURE_END_RETRY_DELAY_MS
   );
+  const maxPaginationPasses = Math.max(
+    1,
+    options.maxPaginationPasses ?? DEFAULT_MAX_PAGINATION_PASSES
+  );
+  const maxStagnantPasses = Math.max(
+    1,
+    options.maxStagnantPasses ?? DEFAULT_MAX_STAGNANT_PASSES
+  );
+  let stagnantPasses = 0;
 
-  while (all.length < maxReviews) {
-    const num = Math.min(PAGE_SIZE, maxReviews - all.length);
-    const requestDataId = resolvedDataId;
-    let acceptedPage: ScrapeDoPage | undefined;
-    let bestTerminalPage: ScrapeDoPage | undefined;
-    let pageAttempts = 0;
+  // Scrape.do can omit a valid next_page_token nondeterministically. Restart a
+  // bounded number of complete pagination chains and union their stable review
+  // IDs, rather than treating one missing token as authoritative.
+  for (let pass = 1; pass <= maxPaginationPasses; pass += 1) {
+    const reviewsBeforePass = all.size;
+    let pageToken: string | undefined;
+    let pagesThisPass = 0;
+    const seenPageTokens = new Set<string>();
 
-    for (let retry = 0; retry <= prematureEndRetries; retry += 1) {
-      const result = await fetchPage(
-        placeId,
-        requestDataId,
-        token,
-        num,
-        pageToken,
-        sortBy
-      );
-      requestsMade += result.attempts;
-      pageAttempts += result.attempts;
+    while (all.size < maxReviews) {
+      // Keep a stable page size across restarted chains. Shrinking `num` based
+      // on already-unioned reviews changes token boundaries and costs requests.
+      const num = Math.min(PAGE_SIZE, maxReviews);
+      const requestDataId = resolvedDataId;
+      let acceptedPage: ScrapeDoPage | undefined;
+      let bestTerminalPage: ScrapeDoPage | undefined;
+      let bestTerminalNewReviews = -1;
+      let pageAttempts = 0;
 
-      const page = result.page;
-      if (!placeInfo && page.place_info) placeInfo = page.place_info;
-      if (page.search_parameters?.data_id) {
-        resolvedDataId = page.search_parameters.data_id;
+      for (let retry = 0; retry <= prematureEndRetries; retry += 1) {
+        const result = await fetchPage(
+          placeId,
+          requestDataId,
+          token,
+          num,
+          pageToken,
+          sortBy
+        );
+        requestsMade += result.attempts;
+        pageAttempts += result.attempts;
+
+        const page = result.page;
+        if (!placeInfo && page.place_info) placeInfo = page.place_info;
+        if (page.search_parameters?.data_id) {
+          resolvedDataId = page.search_parameters.data_id;
+        }
+
+        const reviews = page.reviews ?? [];
+        const newReviewCount = new Set(
+          reviews
+            .map(reviewIdentity)
+            .filter((identity) => !all.has(identity))
+        ).size;
+        if (newReviewCount > bestTerminalNewReviews) {
+          bestTerminalPage = page;
+          bestTerminalNewReviews = newReviewCount;
+        }
+
+        const target = reviewTarget(
+          maxReviews,
+          placeInfo,
+          options.expectedReviewCount
+        );
+        const terminal = reviews.length === 0 || !page.pagination?.next_page_token;
+        const premature = terminal && all.size + newReviewCount < target;
+
+        if (!premature) {
+          acceptedPage = page;
+          break;
+        }
+
+        if (retry < prematureEndRetries && retryDelayMs > 0) {
+          await sleep(retryDelayMs * 2 ** retry);
+        }
       }
+
+      const page = acceptedPage ?? bestTerminalPage ?? {};
+      fetchedPages += 1;
+      pagesThisPass += 1;
 
       const reviews = page.reviews ?? [];
-      if (
-        !bestTerminalPage ||
-        reviews.length > (bestTerminalPage.reviews?.length ?? 0)
-      ) {
-        bestTerminalPage = page;
+      const sizeBeforePage = all.size;
+      for (const review of reviews) {
+        all.set(reviewIdentity(review), review);
       }
+      const newReviewCount = all.size - sizeBeforePage;
+      const nextPageToken = page.pagination?.next_page_token;
+      pageDiagnostics.push({
+        pass,
+        page: fetchedPages,
+        reviewCount: reviews.length,
+        newReviewCount,
+        attempts: pageAttempts,
+        hasNextPageToken: Boolean(nextPageToken),
+        identifier: requestDataId ? 'data_id' : 'place_id',
+      });
 
       const target = reviewTarget(
         maxReviews,
         placeInfo,
         options.expectedReviewCount
       );
-      const terminal = reviews.length === 0 || !page.pagination?.next_page_token;
-      const premature = terminal && all.length + reviews.length < target;
-
-      if (!premature) {
-        acceptedPage = page;
+      if (all.size >= target) {
+        stopReason = 'target_reached';
         break;
       }
 
-      if (retry < prematureEndRetries && retryDelayMs > 0) {
-        await sleep(retryDelayMs * 2 ** retry);
+      if (reviews.length === 0) {
+        stopReason = 'empty_page';
+        break;
+      }
+
+      pageToken = nextPageToken;
+      if (!pageToken) {
+        stopReason = 'missing_next_page_token';
+        break;
+      }
+
+      if (seenPageTokens.has(pageToken)) {
+        stopReason = 'repeated_page_token';
+        break;
+      }
+      seenPageTokens.add(pageToken);
+
+      // Deduplication means a broken API could otherwise return unlimited
+      // duplicate pages under ever-changing tokens. Allow one overlap page,
+      // then restart the bounded chain.
+      const maxPagesThisPass =
+        Math.ceil(
+          reviewTarget(maxReviews, placeInfo, options.expectedReviewCount) /
+            PAGE_SIZE
+        ) + 1;
+      if (pagesThisPass >= maxPagesThisPass) {
+        stopReason = 'page_limit_reached';
+        break;
       }
     }
 
-    const page = acceptedPage ?? bestTerminalPage ?? {};
-    fetchedPages += 1;
+    const target = reviewTarget(
+      maxReviews,
+      placeInfo,
+      options.expectedReviewCount
+    );
+    if (all.size >= target) break;
 
-    const reviews = page.reviews ?? [];
-    const nextPageToken = page.pagination?.next_page_token;
-    pageDiagnostics.push({
-      page: fetchedPages,
-      reviewCount: reviews.length,
-      attempts: pageAttempts,
-      hasNextPageToken: Boolean(nextPageToken),
-      identifier: requestDataId ? 'data_id' : 'place_id',
-    });
+    if (all.size === reviewsBeforePass) stagnantPasses += 1;
+    else stagnantPasses = 0;
 
-    if (reviews.length === 0) {
-      stopReason = 'empty_page';
-      break;
-    }
-
-    all.push(...reviews);
-
-    if (all.length >= maxReviews) {
-      stopReason = 'target_reached';
-      break;
-    }
-
-    pageToken = nextPageToken;
-    if (!pageToken) {
-      stopReason = 'missing_next_page_token';
+    if (stagnantPasses >= maxStagnantPasses) {
+      stopReason = 'no_new_reviews';
       break;
     }
   }
@@ -233,7 +320,7 @@ export async function fetchAllScrapeDoReviews(
     placeInfo,
     options.expectedReviewCount
   );
-  const sliced = all.slice(0, maxReviews);
+  const sliced = Array.from(all.values()).slice(0, maxReviews);
 
   return {
     reviews: sliced,
