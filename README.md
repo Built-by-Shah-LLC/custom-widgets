@@ -42,6 +42,16 @@ Add the embed code to GHL sites:
 2. Import and register it in `src/widget-registry.ts` with its widget ID.
 3. Run `npm run build` and redeploy `public/widget.js`.
 
+## BBS Jira delivery workflow
+
+For every bug, task, update, feature, review, test, release, or deployment
+request, agents must first read and apply the local
+[BBS Jira Delivery skill](.agents/skills/bbs-jira-delivery/SKILL.md), then the
+[Widgets verification profile](.agents/skills/bbs-jira-delivery/REPO-PROFILES.md).
+It keeps Jira work in **BBS Software Support** (`DEV`), using the
+`bbs-widgets-software` label, and requires a scoped plan, review evidence,
+appropriate tests, and explicit approval before a push or deployment.
+
 ## Important Notes
 
 - The loader recognizes `data-bbs-embed` (current), `data-custom-widget`

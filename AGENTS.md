@@ -7,3 +7,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## BBS Jira delivery workflow
+
+**Mandatory for every bug, task, feature, update, review, test, release, or
+deployment request:** read and apply
+[.agents/skills/bbs-jira-delivery/SKILL.md](.agents/skills/bbs-jira-delivery/SKILL.md)
+before planning or editing. Read its
+[repository profile](.agents/skills/bbs-jira-delivery/REPO-PROFILES.md) before
+choosing verification, review, or release steps.
+
+Use Jira project **BBS Software Support** (`DEV`) with the
+`bbs-widgets-software` label. Preserve unrelated work and obtain explicit
+approval before any push, merge, deployment, external mutation, or Jira cloud
+change. This workflow supplements the Next.js rules above; when instructions
+conflict, follow the stricter applicable requirement.
