@@ -91,7 +91,8 @@ describe('review image proxy', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/jpeg');
-    expect(response.headers.get('cache-control')).toContain('s-maxage=604800');
+    expect(response.headers.get('cache-control')).toContain('s-maxage=31536000');
+    expect(response.headers.get('cache-control')).toContain('immutable');
     expect(response.headers.get('access-control-allow-origin')).toBe('*');
     expect(await response.text()).toBe('image-bytes');
   });

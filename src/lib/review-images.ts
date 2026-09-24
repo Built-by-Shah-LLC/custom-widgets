@@ -60,9 +60,9 @@ export function isReviewImageReviewId(value: unknown): value is string {
 }
 
 /**
- * Returns a same-service fallback URL for Google review photos. The widget
- * first tries Google directly and only uses this route when the browser is
- * blocked (for example by Chromium ORB), avoiding unnecessary proxy traffic.
+ * Returns the stable, same-service URL used for Google review photos. Loading
+ * through the proxy first lets the widget CDN preserve the image bytes before
+ * Google's signed source URL expires. Non-Google images remain untouched.
  */
 export function reviewImageProxyUrl(
   src: string,
@@ -83,4 +83,13 @@ export function reviewImageProxyUrl(
   }
 
   return `${origin}${REVIEW_IMAGE_PROXY_PATH}?${params.join('&')}`;
+}
+
+/** Proxy first for durability; retain the original as a best-effort fallback. */
+export function reviewImageCandidates(
+  src: string,
+  apiOrigin = '',
+  context: ReviewImageProxyContext = {},
+): string[] {
+  return [...new Set([reviewImageProxyUrl(src, apiOrigin, context), src])];
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   googleReviewImageIdentity,
   parseGoogleReviewImageUrl,
+  reviewImageCandidates,
   reviewImageProxyUrl,
 } from './review-images';
 
@@ -49,6 +50,21 @@ describe('review image URLs', () => {
   it('does not proxy non-Google images', () => {
     const source = 'https://images.example.com/review.jpg';
     expect(reviewImageProxyUrl(source, 'https://widgets.example.com')).toBe(source);
+  });
+
+  it('tries the durable proxy before the expiring Google URL', () => {
+    expect(reviewImageCandidates(GOOGLE_IMAGE, 'https://widgets.example.com', {
+      widgetId: WIDGET_ID,
+      reviewId: 'google-review-123',
+    })).toEqual([
+      `https://widgets.example.com/api/v1/review-images?url=${encodeURIComponent(GOOGLE_IMAGE)}&widgetId=${WIDGET_ID}&reviewId=google-review-123`,
+      GOOGLE_IMAGE,
+    ]);
+  });
+
+  it('does not retry an identical non-Google URL', () => {
+    const source = 'https://images.example.com/review.jpg';
+    expect(reviewImageCandidates(source, 'https://widgets.example.com')).toEqual([source]);
   });
 
   it('rejects unsafe proxy targets', () => {

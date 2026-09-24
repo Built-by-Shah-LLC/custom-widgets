@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { reviewImageProxyUrl } from '@/lib/review-images';
+import { reviewImageCandidates } from '@/lib/review-images';
 
 export function ReviewLightbox({
   images,
@@ -22,7 +22,9 @@ export function ReviewLightbox({
   const [index, setIndex] = useState(initialIndex);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [displaySrc, setDisplaySrc] = useState(images[initialIndex]);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const candidates = reviewImageCandidates(images[index], apiOrigin, { widgetId, reviewId });
+  const displaySrc = candidates[candidateIndex];
 
   const handleImageElement = useCallback((image: HTMLImageElement | null) => {
     // Cached images can already be complete before the framework observes a
@@ -34,7 +36,7 @@ export function ReviewLightbox({
     if (nextIndex < 0 || nextIndex >= images.length) return;
     setLoading(true);
     setFailed(false);
-    setDisplaySrc(images[nextIndex]);
+    setCandidateIndex(0);
     setIndex(nextIndex);
   }, [images]);
 
@@ -53,10 +55,13 @@ export function ReviewLightbox({
       if (nearbyIndex >= 0 && nearbyIndex < images.length) {
         const preload = new Image();
         preload.referrerPolicy = 'no-referrer';
-        preload.src = images[nearbyIndex];
+        preload.src = reviewImageCandidates(images[nearbyIndex], apiOrigin, {
+          widgetId,
+          reviewId,
+        })[0];
       }
     }
-  }, [images, index]);
+  }, [apiOrigin, images, index, reviewId, widgetId]);
 
   return (
     <div
@@ -95,9 +100,8 @@ export function ReviewLightbox({
             referrerPolicy="no-referrer"
             onLoad={() => setLoading(false)}
             onError={() => {
-              const fallback = reviewImageProxyUrl(images[index], apiOrigin, { widgetId, reviewId });
-              if (displaySrc !== fallback) {
-                setDisplaySrc(fallback);
+              if (candidateIndex + 1 < candidates.length) {
+                setCandidateIndex(candidateIndex + 1);
                 return;
               }
               setLoading(false);
@@ -155,7 +159,9 @@ export function ReviewPhoto({
 }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [displaySrc, setDisplaySrc] = useState(src);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const candidates = reviewImageCandidates(src, apiOrigin, { widgetId, reviewId });
+  const displaySrc = candidates[candidateIndex];
 
   const handleImageElement = useCallback((image: HTMLImageElement | null) => {
     if (image?.complete && image.naturalWidth > 0) setLoading(false);
@@ -172,9 +178,8 @@ export function ReviewPhoto({
       {loading && <PhotoSpinner size={Math.min(28, Math.max(18, size * 0.35))} dark />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img ref={handleImageElement} src={displaySrc} alt="" loading={loadingStrategy} decoding="async" referrerPolicy="no-referrer" onLoad={() => setLoading(false)} onError={() => {
-        const fallback = reviewImageProxyUrl(src, apiOrigin, { widgetId, reviewId });
-        if (displaySrc !== fallback) {
-          setDisplaySrc(fallback);
+        if (candidateIndex + 1 < candidates.length) {
+          setCandidateIndex(candidateIndex + 1);
           return;
         }
         setLoading(false);

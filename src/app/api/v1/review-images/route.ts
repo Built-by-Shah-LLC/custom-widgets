@@ -7,7 +7,8 @@ import {
   parseGoogleReviewImageUrl,
 } from '@/lib/review-images';
 
-const PUBLIC_IMAGE_CACHE = 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400';
+const IMAGE_CACHE_SECONDS = 31_536_000;
+const PUBLIC_IMAGE_CACHE = `public, max-age=${IMAGE_CACHE_SECONDS}, s-maxage=${IMAGE_CACHE_SECONDS}, immutable`;
 const ERROR_CACHE = 'no-store';
 const UNAVAILABLE_IMAGE_CACHE = 'public, max-age=60, s-maxage=300, stale-while-revalidate=60';
 const UPSTREAM_TIMEOUT_MS = 10_000;
@@ -375,7 +376,7 @@ export async function GET(request: Request) {
     upstream = await fetch(sourceUrl, {
       cache: 'force-cache',
       redirect: 'manual',
-      next: { revalidate: 604800 },
+      next: { revalidate: IMAGE_CACHE_SECONDS },
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       headers: {
         Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
