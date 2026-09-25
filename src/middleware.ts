@@ -27,6 +27,14 @@ function isPublicWidgetTimingPath(pathname: string, method: string): boolean {
   return pathname === '/api/v1/widget-timing' && method.toUpperCase() === 'POST';
 }
 
+/**
+ * Vercel Cron review refresh. Cron requests carry no Supabase session, so the
+ * route's `Authorization: Bearer ${CRON_SECRET}` check is the entire auth model.
+ */
+function isPublicCronPath(pathname: string, method: string): boolean {
+  return pathname === '/api/cron/review-sync' && method.toUpperCase() === 'GET';
+}
+
 /** Local Playwright harness — only when ENABLE_E2E_HARNESS=true. */
 function isE2eHarnessPath(pathname: string): boolean {
   return (
@@ -76,6 +84,7 @@ export async function middleware(request: NextRequest) {
     isPublicFormSubmit(pathname, method) ||
     isPublicAlertPath(pathname, method) ||
     isPublicWidgetTimingPath(pathname, method) ||
+    isPublicCronPath(pathname, method) ||
     isE2eHarnessPath(pathname)
   ) {
     return NextResponse.next({ request });
