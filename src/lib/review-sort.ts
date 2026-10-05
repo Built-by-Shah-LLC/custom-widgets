@@ -81,15 +81,19 @@ export function reviewComparator(
     }
     switch (config.sortBy) {
       case 'highest_rating':
-        return b.rating - a.rating;
+        return (b.rating - a.rating) || compareNewest(a, b);
       case 'lowest_rating':
-        return a.rating - b.rating;
+        return (a.rating - b.rating) || compareNewest(a, b);
       case 'newest':
-        return relativeTimeToMs(a.relativeTime) - relativeTimeToMs(b.relativeTime);
+        return compareNewest(a, b);
       case 'oldest':
         return relativeTimeToMs(b.relativeTime) - relativeTimeToMs(a.relativeTime);
       default:
         return 0;
     }
   };
+}
+
+function compareNewest(a: DisplayedReview, b: DisplayedReview): number {
+  return relativeTimeToMs(a.relativeTime) - relativeTimeToMs(b.relativeTime);
 }

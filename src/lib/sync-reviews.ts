@@ -1,6 +1,7 @@
 import { fetchAllScrapeDoReviews } from './scrapedo';
 import { supabase } from './db';
 import { mapReviewRow, type ApiReview } from './widget-mappers';
+import { removeUnavailableReviewImages } from './review-image-validation';
 
 export interface SyncResult {
   businessId: string;
@@ -28,6 +29,11 @@ export interface SyncResult {
   }>;
   reviews: ApiReview[];
   syncedAt: string;
+  imageValidation: {
+    checkedImages: number;
+    removedImages: number;
+    changedReviews: number;
+  };
 }
 
 /**
@@ -120,8 +126,36 @@ export async function syncBusinessReviews(
     throw new Error(`Stored reviews read failed: ${storedReviewsError.message}`);
   }
 
+  // Google review-photo URLs can expire or become restricted while the
+  // review itself remains available. Remove only confirmed-dead URLs so the
+  // image filters use photos that can actually render. Transient failures are
+  // retained by the validator and retried on the next refresh.
+  const imageValidation = await removeUnavailableReviewImages(storedRows ?? []);
+  if (imageValidation.changedReviews.length > 0) {
+    const updates = await Promise.all(
+      imageValidation.changedReviews.map(async (review) => {
+        const { error } = await supabase
+          .from('reviews')
+          .update({ images: review.images ?? [] })
+          .eq('id', review.id);
+        return error;
+      }),
+    );
+    const validationUpdateError = updates.find((error) => error !== null);
+    if (validationUpdateError) {
+      throw new Error(`Review image cleanup failed: ${validationUpdateError.message}`);
+    }
+  }
+
+  console.info('[reviews-sync] Review images validated', {
+    businessId: business.id,
+    checkedImages: imageValidation.checkedImages,
+    removedImages: imageValidation.removedImages,
+    changedReviews: imageValidation.changedReviews.length,
+  });
+
   const storedById = new Map(
-    (storedRows ?? []).map((row) => [row.google_review_id as string, row])
+    imageValidation.reviews.map((row) => [row.google_review_id as string, row])
   );
   const fetchedIds = new Set(rows.map((row) => row.google_review_id));
   const orderedStoredRows = [
@@ -129,7 +163,7 @@ export async function syncBusinessReviews(
       const stored = storedById.get(row.google_review_id);
       return stored ? [stored] : [];
     }),
-    ...(storedRows ?? []).filter((row) => !fetchedIds.has(row.google_review_id)),
+    ...imageValidation.reviews.filter((row) => !fetchedIds.has(row.google_review_id)),
   ];
 
   // 4. Update business figures from Google
@@ -197,5 +231,10 @@ export async function syncBusinessReviews(
     pageDiagnostics,
     reviews: cached,
     syncedAt,
+    imageValidation: {
+      checkedImages: imageValidation.checkedImages,
+      removedImages: imageValidation.removedImages,
+      changedReviews: imageValidation.changedReviews.length,
+    },
   };
 }
