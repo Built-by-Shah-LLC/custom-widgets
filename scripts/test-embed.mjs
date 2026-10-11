@@ -13,12 +13,19 @@ import { JSDOM } from 'jsdom';
 
 const widgetId = process.argv[2] || '004a7b18-6bcc-4b2a-a8f9-454012312690';
 const API_ORIGIN = process.argv[3] || 'http://localhost:3000';
+const bootstrapUrl = `${API_ORIGIN}/api/embeds/widget/${widgetId}/data.js`;
 
 // Test the bundle actually being served (deployed) when a remote origin is
 // given; otherwise use the local build output.
 const bundle = API_ORIGIN.startsWith('http://localhost')
   ? readFileSync('public/widget.js', 'utf8')
   : await (await fetch(`${API_ORIGIN}/widget.js`)).text();
+const bootstrapResponse = await fetch(bootstrapUrl);
+if (!bootstrapResponse.ok) {
+  console.error(`Bootstrap fetch failed: ${bootstrapResponse.status} ${bootstrapUrl}`);
+  process.exit(1);
+}
+const bootstrap = await bootstrapResponse.text();
 
 if (!bundle.includes('custom-widgets') && bundle.length < 1000) {
   console.error('Bundle fetch looks wrong, got:', bundle.slice(0, 200));
@@ -30,6 +37,7 @@ const html = `<!DOCTYPE html>
   <body>
     <!-- BuiltByShah Widget Embed -->
     <div data-bbs-embed="${widgetId}"></div>
+    <script async src="${bootstrapUrl}"></script>
     <!-- End BuiltByShah Widget Embed -->
   </body>
 </html>`;
@@ -55,6 +63,14 @@ const dom = new JSDOM(html, {
   },
 });
 
+// jsdom does not load external scripts unless its resource loader is enabled.
+// Execute the fetched bootstrap manually while retaining the real script tag,
+// which is also the runtime's proof that data came from the configured API
+// origin.
+dom.window.eval(bootstrap);
+const expectedBusinessName =
+  dom.window.__BBS_WIDGET_DATA__?.[widgetId]?.business?.name;
+
 // Execute the bundle as the page's inline script would.
 const scriptEl = dom.window.document.createElement('script');
 scriptEl.textContent = bundle;
@@ -79,7 +95,8 @@ console.log('\n--- rendered shadow DOM text ---');
 console.log(rendered.trim() || '(nothing rendered)');
 
 const ok =
-  rendered.includes('SSR Diesel Repairs') ||
-  rendered.includes('GARYS AUTO COLLISION');
+  typeof expectedBusinessName === 'string' &&
+  expectedBusinessName.length > 0 &&
+  rendered.includes(expectedBusinessName);
 console.log('\nRESULT:', ok ? 'PASS — widget rendered live business data' : 'FAIL');
 process.exit(ok ? 0 : 1);
