@@ -22,6 +22,9 @@ async function main() {
     console.log('Total reviews (Google):', result.totalReviews);
     console.log('Scrape.do pages fetched:', result.pagesFetched);
     console.log('Reviews stored:', result.reviewsStored);
+    console.log('Review images stored in Supabase:', result.imageStorage.storedImages);
+    console.log('Review image capture failures:', result.imageStorage.failedImages);
+    console.log('Previous review image URLs preserved:', result.imageStorage.preservedImages);
     console.log('Widgets updated:', result.widgetsUpdated);
     console.log('Synced at:', result.syncedAt);
   } catch (err) {

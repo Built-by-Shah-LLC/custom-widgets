@@ -1,7 +1,7 @@
 # SOP — Widget Deployment (BuiltByShah Custom Widgets)
 
 **Owner:** Hassan
-**Last updated:** 2026-09-21
+**Last updated:** 2026-10-11
 **Repo:** `custom-widgets` (Next.js + Supabase + esbuild embed bundle)
 
 This is the standard operating procedure for deploying review widgets to a new
@@ -54,7 +54,12 @@ npx tsx scripts/sync-reviews.ts PLACE_ID
 ```
 
 Expected output: business name, average rating, total reviews, pages fetched,
-reviews stored, widgets updated. If reviews stored is **0**, stop here and
+reviews stored, review-image storage results, and widgets updated. Review
+photos returned by this refresh are copied to the public `review-images`
+Supabase Storage bucket before their stable Supabase URLs are written to the
+review table and widget cache. Reviewer avatars are not copied. Existing
+companies are not backfilled; their stored review-image URLs remain unchanged
+until that company is refreshed. If reviews stored is **0**, stop here and
 check the Place ID — embedding a widget with no reviews will render an empty
 widget on the client site.
 
@@ -141,6 +146,17 @@ Also do a **visual check** by opening `public/test-embed.html` in the browser
 ---
 
 ## 5. Deploy
+
+Apply the review-image Storage migration before deploying code that writes to
+the `review-images` bucket:
+
+```bash
+npm run migrate -- 20261011040821_persist_refreshed_review_images.sql
+```
+
+The migration is idempotent. Verify that the bucket is public, permits only the
+documented image MIME types, and enforces the 10 MB file limit before refreshing
+reviews in production.
 
 ```bash
 npm run lint

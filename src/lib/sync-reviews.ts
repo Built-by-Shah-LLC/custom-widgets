@@ -2,6 +2,10 @@ import { fetchAllScrapeDoReviews } from './scrapedo';
 import { supabase } from './db';
 import { mapReviewRow, type ApiReview } from './widget-mappers';
 import { removeUnavailableReviewImages } from './review-image-validation';
+import {
+  mirrorRefreshedReviewImages,
+  REVIEW_IMAGES_BUCKET,
+} from './review-image-storage';
 
 export interface SyncResult {
   businessId: string;
@@ -34,6 +38,26 @@ export interface SyncResult {
     removedImages: number;
     changedReviews: number;
   };
+  imageStorage: {
+    attemptedImages: number;
+    storedImages: number;
+    failedImages: number;
+    preservedImages: number;
+  };
+}
+
+type StorageUploadError = {
+  code?: string;
+  message?: string;
+  status?: number;
+  statusCode?: string;
+};
+
+function isExistingStorageObject(error: StorageUploadError) {
+  return error.status === 409
+    || error.statusCode === '409'
+    || error.code === 'Duplicate'
+    || error.code === 'ResourceAlreadyExists';
 }
 
 /**
@@ -99,6 +123,58 @@ export async function syncBusinessReviews(
     ])
   );
 
+  const fetchedReviewIds = Array.from(deduped.keys());
+  const { data: existingFetchedRows, error: existingFetchedRowsError } = fetchedReviewIds.length > 0
+    ? await supabase
+      .from('reviews')
+      .select('google_review_id, images')
+      .eq('business_id', business.id)
+      .in('google_review_id', fetchedReviewIds)
+    : { data: [], error: null };
+  if (existingFetchedRowsError) {
+    throw new Error(`Existing review image read failed: ${existingFetchedRowsError.message}`);
+  }
+
+  const previousImagesByReviewId = new Map(
+    (existingFetchedRows ?? []).map((row) => [
+      row.google_review_id as string,
+      Array.isArray(row.images) ? row.images as string[] : [],
+    ]),
+  );
+  const reviewImageBucket = supabase.storage.from(REVIEW_IMAGES_BUCKET);
+  const imageStorage = await mirrorRefreshedReviewImages(
+    business.id,
+    Array.from(deduped.entries()).map(([reviewId, review]) => ({
+      reviewId,
+      images: review.images ?? [],
+      previousImages: previousImagesByReviewId.get(reviewId) ?? [],
+    })),
+    {
+      upload: async ({ path, bytes, contentType, cacheControl }) => {
+        const { error } = await reviewImageBucket.upload(path, bytes, {
+          cacheControl,
+          contentType,
+          upsert: false,
+        });
+        if (error && !isExistingStorageObject(error)) throw error;
+
+        const { data } = reviewImageBucket.getPublicUrl(path);
+        return data.publicUrl;
+      },
+    },
+  );
+  const storedImagesByReviewId = new Map(
+    imageStorage.reviews.map((review) => [review.reviewId, review.images]),
+  );
+
+  console.info('[reviews-sync] Refreshed review images stored', {
+    businessId: business.id,
+    attemptedImages: imageStorage.attemptedImages,
+    storedImages: imageStorage.storedImages,
+    failedImages: imageStorage.failedImages,
+    preservedImages: imageStorage.preservedImages,
+  });
+
   const rows = Array.from(deduped.entries()).map(([key, r]) => ({
     business_id: business.id,
     google_review_id: r.review_id ?? key,
@@ -107,7 +183,7 @@ export async function syncBusinessReviews(
     rating: r.rating ?? 0,
     text: r.snippet ?? '',
     relative_time: r.date ?? '',
-    images: r.images ?? [],
+    images: storedImagesByReviewId.get(key) ?? [],
   }));
 
   if (rows.length > 0) {
@@ -185,6 +261,12 @@ export async function syncBusinessReviews(
         fetchedPages,
         requestsMade,
         pages: pageDiagnostics,
+        imageStorage: {
+          attemptedImages: imageStorage.attemptedImages,
+          storedImages: imageStorage.storedImages,
+          failedImages: imageStorage.failedImages,
+          preservedImages: imageStorage.preservedImages,
+        },
       },
       reviews_last_synced_at: syncedAt,
       updated_at: syncedAt,
@@ -235,6 +317,12 @@ export async function syncBusinessReviews(
       checkedImages: imageValidation.checkedImages,
       removedImages: imageValidation.removedImages,
       changedReviews: imageValidation.changedReviews.length,
+    },
+    imageStorage: {
+      attemptedImages: imageStorage.attemptedImages,
+      storedImages: imageStorage.storedImages,
+      failedImages: imageStorage.failedImages,
+      preservedImages: imageStorage.preservedImages,
     },
   };
 }

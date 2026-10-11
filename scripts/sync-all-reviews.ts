@@ -37,7 +37,7 @@ async function main() {
       const r = await syncBusinessReviews(b.place_id, 40);
       ok.push(r);
       console.log(
-        `[${i + 1}/${todo.length}] OK  ${b.name} — ${r.reviewsStored} reviews, ${r.widgetsUpdated} widgets`
+        `[${i + 1}/${todo.length}] OK  ${b.name} — ${r.reviewsStored} reviews, ${r.imageStorage.storedImages} images stored, ${r.imageStorage.failedImages} image failures, ${r.widgetsUpdated} widgets`
       );
     } catch (err) {
       failed.push({ name: b.name, placeId: b.place_id, error: err instanceof Error ? err.message : String(err) });
