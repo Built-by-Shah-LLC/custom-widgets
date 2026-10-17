@@ -57,11 +57,12 @@ Expected output: business name, average rating, total reviews, pages fetched,
 reviews stored, review-image storage results, and widgets updated. Review
 photos returned by this refresh are copied to the public `review-images`
 Supabase Storage bucket before their stable Supabase URLs are written to the
-review table and widget cache. Reviewer avatars are not copied. Existing
-companies are not backfilled; their stored review-image URLs remain unchanged
-until that company is refreshed. If reviews stored is **0**, stop here and
-check the Place ID — embedding a widget with no reviews will render an empty
-widget on the client site.
+review table and widget cache. Reviewer avatars are not copied. A refresh does
+not guarantee that historical photo-bearing reviews will be returned again.
+Use **Store Existing Review Photos** below the editor's refresh button to move
+that company's remaining Google-hosted review photos into Supabase Storage. If
+reviews stored is **0**, stop here and check the Place ID — embedding a widget
+with no reviews will render an empty widget on the client site.
 
 To re-sync **all** businesses later (e.g. weekly refresh):
 

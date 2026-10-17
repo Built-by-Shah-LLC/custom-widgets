@@ -10,6 +10,7 @@ import { EditorShell, type EditorTabDef, type EditorTabMeta } from './EditorShel
 import { ContentTab, LayoutTab, SettingsTab, StyleTab } from './carousel-tabs';
 import type { BusinessOption } from './tabs';
 import { reviewSyncStatus, type ReviewLoadStatus } from './review-sync-status';
+import { reviewPhotoMigrationStatus } from './review-photo-migration-status';
 import { liveCacheWarningFromText, liveCacheWarningOf } from '@/lib/live-cache-warning';
 import { showToast } from '@/components/ui/Toast';
 
@@ -109,6 +110,8 @@ export function CarouselEditor({
   const [loadedReviews, setLoadedReviews] = useState<Record<string, Review[]>>({});
   const [reviewLoadStatus, setReviewLoadStatus] = useState<ReviewLoadStatus | null>(null);
   const [reviewFetching, setReviewFetching] = useState(false);
+  const [photoMigrationStatus, setPhotoMigrationStatus] = useState<ReviewLoadStatus | null>(null);
+  const [photoMigrating, setPhotoMigrating] = useState(false);
 
   const selected = items.find((i) => i.widgetId === selectedId);
 
@@ -136,8 +139,8 @@ export function CarouselEditor({
   };
 
   const save = async () => {
-    if (reviewLoadStatus?.state === 'loading') {
-      alert('Wait for reviews to finish loading before saving.');
+    if (reviewLoadStatus?.state === 'loading' || photoMigrationStatus?.state === 'loading') {
+      alert('Wait for review processing to finish before saving.');
       return;
     }
     if (!businessId) {
@@ -186,12 +189,15 @@ export function CarouselEditor({
     reviewLoadStatus,
     hasReviews: reviews.length > 0,
     reviewFetching,
+    photoMigrationStatus,
+    photoMigrating,
     businesses: [],
     selectedBusinessId: businessId,
     onFetchReviews: async () => {
-      if (!placeId || reviewFetching) return;
+      if (!placeId || reviewFetching || photoMigrating) return;
 
       setReviewFetching(true);
+      setPhotoMigrationStatus(null);
       setReviewLoadStatus({ state: 'loading', message: 'Fetching up to the latest 500 reviews…' });
       try {
         const response = await fetch('/api/v1/sync', {
@@ -229,7 +235,43 @@ export function CarouselEditor({
         setReviewFetching(false);
       }
     },
+    onMigrateReviewPhotos: async () => {
+      if (!businessId || photoMigrating || reviewFetching) return;
+
+      setPhotoMigrating(true);
+      setPhotoMigrationStatus({
+        state: 'loading',
+        message: 'Storing and verifying existing review photos…',
+      });
+      try {
+        const response = await fetch('/api/v1/review-images/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessId }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.message ?? result.error ?? 'Review photo migration failed');
+        }
+        const migrationWarning = liveCacheWarningOf(result);
+        if (migrationWarning) showToast(migrationWarning, 'warning', 8000);
+
+        setLoadedReviews((current) => ({
+          ...current,
+          [businessId]: (result.reviews ?? []) as Review[],
+        }));
+        setPhotoMigrationStatus(reviewPhotoMigrationStatus(result));
+      } catch (error) {
+        setPhotoMigrationStatus({
+          state: 'error',
+          message: error instanceof Error ? error.message : 'Review photo migration failed',
+        });
+      } finally {
+        setPhotoMigrating(false);
+      }
+    },
     onSelectBusiness: async (option: BusinessOption) => {
+      setPhotoMigrationStatus(null);
       let id = option.id;
       if (option.source === 'google') {
         setAddedBusinesses((current) => [{ id, placeId: option.placeId ?? '', name: option.name, address: option.address, averageRating: option.averageRating ?? 0, totalReviews: option.totalReviews ?? 0 }, ...current.filter((b) => b.id !== id)]);

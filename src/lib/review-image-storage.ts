@@ -39,6 +39,11 @@ export interface ReviewImageStorageResult {
   storedImages: number;
   failedImages: number;
   preservedImages: number;
+  failures: Array<{
+    reviewId: string;
+    imageIndex: number;
+    reason: string;
+  }>;
 }
 
 interface MirrorReviewImageOptions {
@@ -48,6 +53,7 @@ interface MirrorReviewImageOptions {
   maxBytes?: number;
   maxTotalBytes?: number;
   concurrency?: number;
+  preserveMissingPreviousImages?: boolean;
 }
 
 interface DownloadedImage {
@@ -172,7 +178,11 @@ async function downloadReviewImage(
     .trim()
     .toLowerCase();
   const extension = EXTENSION_BY_CONTENT_TYPE.get(contentType);
-  if (!response.ok || !extension) {
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Review image source returned HTTP ${response.status}`);
+  }
+  if (!extension) {
     await response.body?.cancel();
     throw new Error('Review image source did not return a supported image');
   }
@@ -204,10 +214,23 @@ export async function mirrorRefreshedReviewImages(
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
-  const output = reviews.map((review) => ({
-    reviewId: review.reviewId,
-    images: new Array<string | undefined>(review.images?.length ?? 0),
-  }));
+  let preservedMissingImages = 0;
+  const output = reviews.map((review) => {
+    const incomingLength = review.images?.length ?? 0;
+    const outputLength = options.preserveMissingPreviousImages
+      ? Math.max(incomingLength, review.previousImages?.length ?? 0)
+      : incomingLength;
+    const images = new Array<string | undefined>(outputLength);
+    if (options.preserveMissingPreviousImages) {
+      for (let index = incomingLength; index < outputLength; index += 1) {
+        const previous = review.previousImages?.[index];
+        if (!previous) continue;
+        images[index] = previous;
+        preservedMissingImages += 1;
+      }
+    }
+    return { reviewId: review.reviewId, images };
+  });
   const jobs: ImageJob[] = [];
 
   reviews.forEach((review, reviewIndex) => {
@@ -224,8 +247,9 @@ export async function mirrorRefreshedReviewImages(
 
   let storedImages = 0;
   let failedImages = 0;
-  let preservedImages = 0;
+  let preservedImages = preservedMissingImages;
   let attemptedUploadBytes = 0;
+  const failures: ReviewImageStorageResult['failures'] = [];
   const downloadCache = new Map<string, Promise<DownloadedImage>>();
   const remainingJobsBySource = new Map<string, number>();
   for (const job of jobs) {
@@ -258,8 +282,13 @@ export async function mirrorRefreshedReviewImages(
       }
       output[job.reviewIndex].images[job.imageIndex] = parsedPublicUrl.href;
       storedImages += 1;
-    } catch {
+    } catch (error) {
       failedImages += 1;
+      failures.push({
+        reviewId: job.reviewId,
+        imageIndex: job.imageIndex,
+        reason: error instanceof Error ? error.message : 'Unknown image-storage failure',
+      });
       if (job.previous) {
         output[job.reviewIndex].images[job.imageIndex] = job.previous;
         preservedImages += 1;
@@ -284,5 +313,6 @@ export async function mirrorRefreshedReviewImages(
     storedImages,
     failedImages,
     preservedImages,
+    failures,
   };
 }

@@ -79,6 +79,9 @@ describe('review image storage', () => {
       failedImages: 3,
       preservedImages: 3,
     });
+    expect(result.failures).toEqual(expect.arrayContaining([expect.objectContaining({
+      reviewId: 'review-a', imageIndex: 0, reason: 'Review image source returned HTTP 403',
+    })]));
   });
 
   it('omits failed brand-new images instead of persisting an expiring source URL', async () => {
@@ -166,6 +169,26 @@ describe('review image storage', () => {
       storedImages: 1,
       failedImages: 1,
       preservedImages: 1,
+    });
+  });
+
+  it('can preserve prior photos omitted by a 403-triggered provider refresh', async () => {
+    const previous = [googleImage('expired-one'), googleImage('expired-two')];
+    const result = await mirrorRefreshedReviewImages(
+      'business-1',
+      [{ reviewId: 'review-a', images: [], previousImages: previous }],
+      {
+        fetchImpl: vi.fn(),
+        upload: vi.fn(),
+        preserveMissingPreviousImages: true,
+      },
+    );
+
+    expect(result.reviews).toEqual([{ reviewId: 'review-a', images: previous }]);
+    expect(result).toMatchObject({
+      attemptedImages: 0,
+      failedImages: 0,
+      preservedImages: 2,
     });
   });
 });

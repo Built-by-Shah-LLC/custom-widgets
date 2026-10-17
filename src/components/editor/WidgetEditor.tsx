@@ -10,6 +10,7 @@ import { EditorShell, type EditorTabDef, type EditorTabMeta } from './EditorShel
 import { ContentTab, LayoutTab, SettingsTab, StyleTab } from './tabs';
 import type { BusinessOption } from './tabs';
 import { reviewSyncStatus, type ReviewLoadStatus } from './review-sync-status';
+import { reviewPhotoMigrationStatus } from './review-photo-migration-status';
 import { liveCacheWarningFromText, liveCacheWarningOf } from '@/lib/live-cache-warning';
 import { showToast } from '@/components/ui/Toast';
 
@@ -97,6 +98,8 @@ export function WidgetEditor({
   const [selectedReviews, setSelectedReviews] = useState<Review[] | null>(null);
   const [reviewLoadStatus, setReviewLoadStatus] = useState<ReviewLoadStatus | null>(null);
   const [reviewFetching, setReviewFetching] = useState(false);
+  const [photoMigrationStatus, setPhotoMigrationStatus] = useState<ReviewLoadStatus | null>(null);
+  const [photoMigrating, setPhotoMigrating] = useState(false);
 
   const selected = items.find((i) => i.widgetId === selectedId);
 
@@ -113,6 +116,7 @@ export function WidgetEditor({
   const currentBusiness = newBusiness ?? selected.business;
   const currentReviews = selectedReviews ?? selected.reviews;
   const currentPlaceId = newBusiness?.placeId ?? selected.placeId;
+  const currentBusinessId = newBusiness?.id ?? selected.businessId;
 
   const update = <K extends keyof WidgetConfig>(key: K, value: WidgetConfig[K]) => {
     setConfigs((c) => ({ ...c, [selectedId]: { ...config, [key]: value } }));
@@ -120,8 +124,8 @@ export function WidgetEditor({
   };
 
   const save = async () => {
-    if (reviewLoadStatus?.state === 'loading') {
-      alert('Wait for reviews to finish loading before saving.');
+    if (reviewLoadStatus?.state === 'loading' || photoMigrationStatus?.state === 'loading') {
+      alert('Wait for review processing to finish before saving.');
       return;
     }
     if (isNew && !(newBusiness?.id ?? selected.businessId)) {
@@ -171,12 +175,15 @@ export function WidgetEditor({
     reviewLoadStatus,
     hasReviews: currentReviews.length > 0,
     reviewFetching,
+    photoMigrationStatus,
+    photoMigrating,
     businesses: [],
     selectedBusinessId: newBusiness?.id ?? selected.businessId,
     onFetchReviews: async () => {
-      if (!currentPlaceId || reviewFetching) return;
+      if (!currentPlaceId || reviewFetching || photoMigrating) return;
 
       setReviewFetching(true);
+      setPhotoMigrationStatus(null);
       setReviewLoadStatus({ state: 'loading', message: 'Fetching up to the latest 500 reviews…' });
       try {
         const response = await fetch('/api/v1/sync', {
@@ -214,7 +221,40 @@ export function WidgetEditor({
         setReviewFetching(false);
       }
     },
+    onMigrateReviewPhotos: async () => {
+      if (!currentBusinessId || photoMigrating || reviewFetching) return;
+
+      setPhotoMigrating(true);
+      setPhotoMigrationStatus({
+        state: 'loading',
+        message: 'Storing and verifying existing review photos…',
+      });
+      try {
+        const response = await fetch('/api/v1/review-images/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessId: currentBusinessId }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.message ?? result.error ?? 'Review photo migration failed');
+        }
+        const migrationWarning = liveCacheWarningOf(result);
+        if (migrationWarning) showToast(migrationWarning, 'warning', 8000);
+
+        setSelectedReviews((result.reviews ?? []) as Review[]);
+        setPhotoMigrationStatus(reviewPhotoMigrationStatus(result));
+      } catch (error) {
+        setPhotoMigrationStatus({
+          state: 'error',
+          message: error instanceof Error ? error.message : 'Review photo migration failed',
+        });
+      } finally {
+        setPhotoMigrating(false);
+      }
+    },
     onSelectBusiness: async (option: BusinessOption) => {
+      setPhotoMigrationStatus(null);
       if (option.source === 'google') {
         setNewBusiness({ id: option.id, placeId: option.placeId ?? '', name: option.name, address: option.address, averageRating: option.averageRating ?? 0, totalReviews: option.totalReviews ?? 0 });
         setSelectedReviews([]);

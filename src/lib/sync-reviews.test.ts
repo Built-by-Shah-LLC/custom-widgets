@@ -4,10 +4,8 @@ const mocks = vi.hoisted(() => ({
   fetchAllScrapeDoReviews: vi.fn(),
   mirrorRefreshedReviewImages: vi.fn(),
   removeUnavailableReviewImages: vi.fn(),
+  uploadVerifiedReviewImage: vi.fn(),
   reviewUpsert: vi.fn(),
-  bucketUpload: vi.fn(),
-  getPublicUrl: vi.fn(),
-  storageFrom: vi.fn(),
   from: vi.fn(),
 }));
 
@@ -16,8 +14,11 @@ vi.mock('./scrapedo', () => ({
 }));
 
 vi.mock('./review-image-storage', () => ({
-  REVIEW_IMAGES_BUCKET: 'review-images',
   mirrorRefreshedReviewImages: mocks.mirrorRefreshedReviewImages,
+}));
+
+vi.mock('./verified-review-image-upload', () => ({
+  uploadVerifiedReviewImage: mocks.uploadVerifiedReviewImage,
 }));
 
 vi.mock('./review-image-validation', () => ({
@@ -27,7 +28,6 @@ vi.mock('./review-image-validation', () => ({
 vi.mock('./db', () => ({
   supabase: {
     from: mocks.from,
-    storage: { from: mocks.storageFrom },
   },
 }));
 
@@ -96,16 +96,7 @@ describe('syncBusinessReviews review image storage', () => {
       removedImages: 0,
     }));
     mocks.reviewUpsert.mockResolvedValue({ error: null });
-    // A content-addressed object can already exist after a retry. Treat that
-    // conflict as idempotent and continue using its deterministic public URL.
-    mocks.bucketUpload.mockResolvedValue({
-      error: { status: 409, code: 'ResourceAlreadyExists' },
-    });
-    mocks.getPublicUrl.mockReturnValue({ data: { publicUrl: storedImage } });
-    mocks.storageFrom.mockReturnValue({
-      upload: mocks.bucketUpload,
-      getPublicUrl: mocks.getPublicUrl,
-    });
+    mocks.uploadVerifiedReviewImage.mockResolvedValue(storedImage);
 
     mocks.from.mockImplementation((table: string) => {
       if (table === 'businesses') {
@@ -174,7 +165,6 @@ describe('syncBusinessReviews review image storage', () => {
   it('stores mirrored review URLs while leaving the author avatar unchanged', async () => {
     const result = await syncBusinessReviews('place-1', 40);
 
-    expect(mocks.storageFrom).toHaveBeenCalledWith('review-images');
     expect(mocks.mirrorRefreshedReviewImages).toHaveBeenCalledWith(
       'business-1',
       [{
@@ -191,15 +181,12 @@ describe('syncBusinessReviews review image storage', () => {
         images: ['https://project.supabase.co/storage/v1/object/public/review-images/stored.jpg'],
       }),
     ], { onConflict: 'google_review_id' });
-    expect(mocks.bucketUpload).toHaveBeenCalledWith(
-      'business-1/review-1/photo.jpg',
-      expect.any(Uint8Array),
-      {
-        cacheControl: '31536000',
-        contentType: 'image/jpeg',
-        upsert: false,
-      },
-    );
+    expect(mocks.uploadVerifiedReviewImage).toHaveBeenCalledWith({
+      path: 'business-1/review-1/photo.jpg',
+      bytes: expect.any(Uint8Array),
+      cacheControl: '31536000',
+      contentType: 'image/jpeg',
+    });
     expect(result.imageStorage).toEqual({
       attemptedImages: 1,
       storedImages: 1,
@@ -209,5 +196,24 @@ describe('syncBusinessReviews review image storage', () => {
     expect(result.reviews[0].authorPhotoUrl).toBe(
       'https://lh3.googleusercontent.com/avatar=s100',
     );
+  });
+
+  it('can preserve unavailable historical URLs during a 403 migration refresh', async () => {
+    const result = await syncBusinessReviews('place-1', 40, {
+      preserveMissingReviewImages: true,
+      preserveUnavailableReviewImages: true,
+    });
+
+    expect(mocks.mirrorRefreshedReviewImages).toHaveBeenCalledWith(
+      'business-1',
+      expect.any(Array),
+      expect.objectContaining({ preserveMissingPreviousImages: true }),
+    );
+    expect(mocks.removeUnavailableReviewImages).not.toHaveBeenCalled();
+    expect(result.imageValidation).toEqual({
+      checkedImages: 0,
+      removedImages: 0,
+      changedReviews: 0,
+    });
   });
 });

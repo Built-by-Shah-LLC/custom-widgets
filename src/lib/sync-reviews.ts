@@ -4,8 +4,8 @@ import { mapReviewRow, type ApiReview } from './widget-mappers';
 import { removeUnavailableReviewImages } from './review-image-validation';
 import {
   mirrorRefreshedReviewImages,
-  REVIEW_IMAGES_BUCKET,
 } from './review-image-storage';
+import { uploadVerifiedReviewImage } from './verified-review-image-upload';
 
 export interface SyncResult {
   businessId: string;
@@ -46,20 +46,6 @@ export interface SyncResult {
   };
 }
 
-type StorageUploadError = {
-  code?: string;
-  message?: string;
-  status?: number;
-  statusCode?: string;
-};
-
-function isExistingStorageObject(error: StorageUploadError) {
-  return error.status === 409
-    || error.statusCode === '409'
-    || error.code === 'Duplicate'
-    || error.code === 'ResourceAlreadyExists';
-}
-
 /**
  * Fetches reviews from Scrape.do and stores them in Supabase.
  *
@@ -69,7 +55,11 @@ function isExistingStorageObject(error: StorageUploadError) {
  */
 export async function syncBusinessReviews(
   placeId: string,
-  maxReviews = 40
+  maxReviews = 40,
+  options: {
+    preserveMissingReviewImages?: boolean;
+    preserveUnavailableReviewImages?: boolean;
+  } = {},
 ): Promise<SyncResult> {
   const token = process.env.SCRAPEDO_TOKEN;
   if (!token) throw new Error('SCRAPEDO_TOKEN not configured');
@@ -141,7 +131,6 @@ export async function syncBusinessReviews(
       Array.isArray(row.images) ? row.images as string[] : [],
     ]),
   );
-  const reviewImageBucket = supabase.storage.from(REVIEW_IMAGES_BUCKET);
   const imageStorage = await mirrorRefreshedReviewImages(
     business.id,
     Array.from(deduped.entries()).map(([reviewId, review]) => ({
@@ -150,17 +139,8 @@ export async function syncBusinessReviews(
       previousImages: previousImagesByReviewId.get(reviewId) ?? [],
     })),
     {
-      upload: async ({ path, bytes, contentType, cacheControl }) => {
-        const { error } = await reviewImageBucket.upload(path, bytes, {
-          cacheControl,
-          contentType,
-          upsert: false,
-        });
-        if (error && !isExistingStorageObject(error)) throw error;
-
-        const { data } = reviewImageBucket.getPublicUrl(path);
-        return data.publicUrl;
-      },
+      upload: uploadVerifiedReviewImage,
+      preserveMissingPreviousImages: options.preserveMissingReviewImages,
     },
   );
   const storedImagesByReviewId = new Map(
@@ -206,7 +186,14 @@ export async function syncBusinessReviews(
   // review itself remains available. Remove only confirmed-dead URLs so the
   // image filters use photos that can actually render. Transient failures are
   // retained by the validator and retried on the next refresh.
-  const imageValidation = await removeUnavailableReviewImages(storedRows ?? []);
+  const imageValidation = options.preserveUnavailableReviewImages
+    ? {
+        reviews: storedRows ?? [],
+        changedReviews: [],
+        checkedImages: 0,
+        removedImages: 0,
+      }
+    : await removeUnavailableReviewImages(storedRows ?? []);
   if (imageValidation.changedReviews.length > 0) {
     const updates = await Promise.all(
       imageValidation.changedReviews.map(async (review) => {

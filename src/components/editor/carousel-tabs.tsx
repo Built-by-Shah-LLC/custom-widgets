@@ -16,6 +16,7 @@ import {
 } from './controls';
 import { ExcludeReviewsPicker } from './ExcludeReviewsPicker';
 import { ReviewFetchButton } from './ReviewFetchButton';
+import { ReviewPhotoMigrationButton } from './ReviewPhotoMigrationButton';
 import type { BusinessOption } from './tabs';
 import type { ReviewLoadStatus } from './review-sync-status';
 
@@ -33,6 +34,9 @@ export interface CarouselTabProps {
   hasReviews?: boolean;
   reviewFetching?: boolean;
   onFetchReviews?: () => void | Promise<void>;
+  photoMigrationStatus?: ReviewLoadStatus | null;
+  photoMigrating?: boolean;
+  onMigrateReviewPhotos?: () => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +57,9 @@ export function ContentTab({
   hasReviews = false,
   reviewFetching = false,
   onFetchReviews,
+  photoMigrationStatus,
+  photoMigrating = false,
+  onMigrateReviewPhotos,
 }: CarouselTabProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
@@ -126,11 +133,19 @@ export function ContentTab({
                     {reviewLoadStatus.message}
                   </div>
                 )}
+                {photoMigrationStatus && (
+                  <div className={`mt-1 flex items-center gap-1.5 text-xs ${photoMigrationStatus.state === 'error' ? 'text-[var(--color-danger)]' : photoMigrationStatus.state === 'partial' ? 'text-amber-700' : photoMigrationStatus.state === 'complete' ? 'text-emerald-700' : 'text-[var(--color-text-secondary)]'}`}>
+                    {photoMigrationStatus.state === 'loading' && <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+                    {photoMigrationStatus.state === 'complete' && <span aria-hidden>✓</span>}
+                    {photoMigrationStatus.state === 'partial' && <span aria-hidden>!</span>}
+                    {photoMigrationStatus.message}
+                  </div>
+                )}
               </div>
             </div>
             <button
               type="button"
-              disabled={reviewLoadStatus?.state === 'loading'}
+              disabled={reviewLoadStatus?.state === 'loading' || photoMigrating}
               onClick={() => {
                 setPickerOpen((o) => !o);
                 setPickerQuery('');
@@ -198,8 +213,15 @@ export function ContentTab({
             <ReviewFetchButton
               hasReviews={hasReviews}
               loading={reviewFetching}
-              disabled={reviewLoadStatus?.state === 'loading'}
+              disabled={reviewLoadStatus?.state === 'loading' || photoMigrating}
               onClick={() => void onFetchReviews()}
+            />
+          )}
+          {selectedBusinessId && onMigrateReviewPhotos && (
+            <ReviewPhotoMigrationButton
+              loading={photoMigrating}
+              disabled={photoMigrating || reviewFetching || reviewLoadStatus?.state === 'loading'}
+              onClick={() => void onMigrateReviewPhotos()}
             />
           )}
         </Card>
