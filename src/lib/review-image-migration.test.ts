@@ -66,21 +66,69 @@ describe('review image migration', () => {
         failedImages: 0,
         preservedImages: 0,
       },
+      imageValidation: {
+        checkedImages: 0,
+        removedImages: 0,
+        changedReviews: 0,
+      },
     }));
 
     const migration = await migrateBusinessReviewImages('business-1', { backfill, refresh });
 
     expect(refresh).toHaveBeenCalledOnce();
-    expect(refresh).toHaveBeenCalledWith('place-1');
+    expect(refresh).toHaveBeenCalledWith('place-1', 500, {
+      preserveMissingReviewImages: true,
+      preserveUnavailableReviewImages: false,
+    });
     expect(backfill).toHaveBeenCalledTimes(2);
     expect(migration).toMatchObject({
       refreshTriggered: true,
       complete: true,
       remainingGoogleImages: 0,
       verifiedImages: 1,
+      removedUnavailableImages: 0,
       reviews: refreshedReviews,
     });
     expect(migration.widgetIds).toEqual(['widget-from-refresh', 'widget-after-retry']);
+  });
+
+  it('removes a confirmed-dead URL when the review no longer has a recoverable photo', async () => {
+    const backfill = vi.fn()
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(result({
+        candidateImages: 0,
+        attemptedImages: 0,
+        storedImages: 0,
+        failedImages: 0,
+        preservedImages: 0,
+        remainingGoogleImages: 0,
+        failures: [],
+      }));
+    const refresh = vi.fn(async () => ({
+      widgetIds: ['widget-after-cleanup'],
+      imageStorage: {
+        attemptedImages: 0,
+        storedImages: 0,
+        failedImages: 0,
+        preservedImages: 0,
+      },
+      imageValidation: {
+        checkedImages: 1,
+        removedImages: 1,
+        changedReviews: 1,
+      },
+    }));
+
+    const migration = await migrateBusinessReviewImages('business-1', { backfill, refresh });
+
+    expect(migration).toMatchObject({
+      refreshTriggered: true,
+      complete: true,
+      storedImages: 0,
+      verifiedImages: 0,
+      removedUnavailableImages: 1,
+      remainingGoogleImages: 0,
+    });
   });
 
   it('does not refresh for failures other than HTTP 403', async () => {

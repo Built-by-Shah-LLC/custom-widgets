@@ -43,4 +43,19 @@ describe('review photo migration status', () => {
       message: '2 photos stored and verified; 1 Google URLs remain. Refresh retry failed: provider unavailable',
     });
   });
+
+  it('reports a deleted Google photo as removed instead of stored', () => {
+    expect(reviewPhotoMigrationStatus({
+      candidateImages: 1,
+      storedImages: 0,
+      verifiedImages: 0,
+      removedUnavailableImages: 1,
+      remainingGoogleImages: 0,
+      refreshTriggered: true,
+      complete: true,
+    })).toEqual({
+      state: 'complete',
+      message: '0 existing review photos stored in Supabase and byte-verified; 1 confirmed unavailable Google photo was removed. A 403 response triggered one review refresh and retry.',
+    });
+  });
 });

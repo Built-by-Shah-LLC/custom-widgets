@@ -11,6 +11,7 @@ export interface ReviewImageMigrationResult {
   attemptedImages: number;
   storedImages: number;
   verifiedImages: number;
+  removedUnavailableImages: number;
   failedImages: number;
   remainingGoogleImages: number;
   updatedReviews: number;
@@ -24,7 +25,14 @@ export interface ReviewImageMigrationResult {
 
 interface MigrationDependencies {
   backfill?: (businessId: string) => Promise<ReviewImageBackfillResult>;
-  refresh?: (placeId: string) => Promise<Pick<SyncResult, 'widgetIds' | 'imageStorage'>>;
+  refresh?: (
+    placeId: string,
+    maxReviews: number,
+    options: {
+      preserveMissingReviewImages: boolean;
+      preserveUnavailableReviewImages: boolean;
+    },
+  ) => Promise<Pick<SyncResult, 'widgetIds' | 'imageStorage' | 'imageValidation'>>;
 }
 
 function hasForbiddenSource(result: ReviewImageBackfillResult): boolean {
@@ -37,15 +45,11 @@ export async function migrateBusinessReviewImages(
 ): Promise<ReviewImageMigrationResult> {
   const backfill = dependencies.backfill
     ?? ((id: string) => backfillBusinessReviewImages(createSupabaseReviewImageBackfillStore(), id));
-  const refresh = dependencies.refresh
-    ?? ((placeId: string) => syncBusinessReviews(placeId, 500, {
-      preserveMissingReviewImages: true,
-      preserveUnavailableReviewImages: true,
-    }));
+  const refresh = dependencies.refresh ?? syncBusinessReviews;
 
   const first = await backfill(businessId);
   let final = first;
-  let refreshResult: Pick<SyncResult, 'widgetIds' | 'imageStorage'> | undefined;
+  let refreshResult: Pick<SyncResult, 'widgetIds' | 'imageStorage' | 'imageValidation'> | undefined;
   let refreshTriggered = false;
   let refreshError: string | undefined;
   let attemptedImages = first.attemptedImages;
@@ -55,7 +59,14 @@ export async function migrateBusinessReviewImages(
   if (hasForbiddenSource(first)) {
     refreshTriggered = true;
     try {
-      refreshResult = await refresh(first.placeId);
+      refreshResult = await refresh(first.placeId, 500, {
+        // Keep historical photos that a partial provider response merely omits,
+        // but remove a URL when Google confirms it is no longer available. This
+        // lets deleted reviews remain as text without leaving broken images in
+        // the database or any widget cache.
+        preserveMissingReviewImages: true,
+        preserveUnavailableReviewImages: false,
+      });
       refreshResult.widgetIds.forEach((id) => widgetIds.add(id));
       attemptedImages += refreshResult.imageStorage.attemptedImages;
 
@@ -70,12 +81,18 @@ export async function migrateBusinessReviewImages(
 
   const complete = final.remainingGoogleImages === 0 && !refreshError;
   // A refresh can re-process photos already stored by the first pass, so raw
-  // storage writes may exceed the original candidate count. Report only the
-  // original Google URLs that no longer remain instead of double-counting.
-  const migratedImages = Math.max(
+  // storage writes may exceed the original candidate count. Derive the result
+  // from the original URLs, then separate stored photos from confirmed-dead
+  // URLs that the refresh removed.
+  const resolvedImages = Math.max(
     0,
     Math.min(first.candidateImages, first.candidateImages - final.remainingGoogleImages),
   );
+  const removedUnavailableImages = Math.min(
+    resolvedImages,
+    refreshResult?.imageValidation.removedImages ?? 0,
+  );
+  const migratedImages = resolvedImages - removedUnavailableImages;
   return {
     businessId,
     businessName: final.businessName,
@@ -84,6 +101,7 @@ export async function migrateBusinessReviewImages(
     attemptedImages,
     storedImages: migratedImages,
     verifiedImages: migratedImages,
+    removedUnavailableImages,
     failedImages: final.failures.length,
     remainingGoogleImages: final.remainingGoogleImages,
     updatedReviews,
