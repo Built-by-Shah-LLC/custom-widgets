@@ -1,4 +1,10 @@
-import { fetchAllScrapeDoReviews } from './scrapedo';
+import {
+  fetchAllScrapeDoReviews,
+  type ScrapeDoPageDiagnostic,
+  type ScrapeDoReview,
+  type ScrapeDoReviewSort,
+  type ScrapeDoReviewsResult,
+} from './scrapedo';
 import { supabase } from './db';
 import { mapReviewRow, type ApiReview } from './widget-mappers';
 import { removeUnavailableReviewImages } from './review-image-validation';
@@ -22,15 +28,7 @@ export interface SyncResult {
   complete: boolean;
   stopReason: string;
   requestsMade: number;
-  pageDiagnostics: Array<{
-    pass: number;
-    page: number;
-    reviewCount: number;
-    newReviewCount: number;
-    attempts: number;
-    hasNextPageToken: boolean;
-    identifier: 'data_id' | 'place_id';
-  }>;
+  pageDiagnostics: Array<ScrapeDoPageDiagnostic & { sortBy: ScrapeDoReviewSort }>;
   reviews: ApiReview[];
   syncedAt: string;
   imageValidation: {
@@ -46,6 +44,119 @@ export interface SyncResult {
   };
 }
 
+function reviewIdentity(businessId: string, review: ScrapeDoReview) {
+  return review.review_id
+    ?? `${businessId}|${review.user?.name ?? 'anon'}|${review.date ?? ''}|${(review.snippet ?? '').slice(0, 40)}`;
+}
+
+function withSortDiagnostics(
+  result: ScrapeDoReviewsResult,
+  sortBy: ScrapeDoReviewSort,
+  pageOffset = 0,
+): Array<ScrapeDoPageDiagnostic & { sortBy: ScrapeDoReviewSort }> {
+  return result.pageDiagnostics.map((diagnostic) => ({
+    ...diagnostic,
+    page: diagnostic.page + pageOffset,
+    sortBy,
+  }));
+}
+
+async function fetchReviewsForSync(
+  business: {
+    id: string;
+    scrapedo_data_id: string | null;
+    total_reviews: number | null;
+  },
+  placeId: string,
+  token: string,
+  maxReviews: number,
+  requestedSort: ScrapeDoReviewSort,
+): Promise<Omit<ScrapeDoReviewsResult, 'pageDiagnostics'> & {
+  pageDiagnostics: Array<ScrapeDoPageDiagnostic & { sortBy: ScrapeDoReviewSort }>;
+}> {
+  const fetchOptions = {
+    dataId: business.scrapedo_data_id,
+    expectedReviewCount: business.total_reviews,
+  };
+  const primary = await fetchAllScrapeDoReviews(
+    placeId,
+    token,
+    maxReviews,
+    requestedSort,
+    fetchOptions,
+  );
+  const primaryDiagnostics = withSortDiagnostics(primary, requestedSort);
+
+  // A normal refresh is newest-first, but some Google Maps responses expose
+  // only a small unpaged subset for that sort. A relevance pass can contain
+  // older photo reviews that are absent from the newest subset. Merge it only
+  // when the provider itself reports that the newest pass missed its target.
+  if (requestedSort !== 'newest' || primary.complete) {
+    return { ...primary, pageDiagnostics: primaryDiagnostics };
+  }
+
+  try {
+    const relevance = await fetchAllScrapeDoReviews(
+      placeId,
+      token,
+      maxReviews,
+      'relevance',
+      {
+        ...fetchOptions,
+        dataId: primary.dataId ?? fetchOptions.dataId,
+      },
+    );
+    const merged = new Map<string, ScrapeDoReview>();
+    for (const review of primary.reviews) {
+      merged.set(reviewIdentity(business.id, review), review);
+    }
+    // Let the relevance representation win for duplicate IDs because it can
+    // include photo URLs omitted by the newest representation. Preserve the
+    // union of both image lists so a sparser representation cannot remove a
+    // photo discovered by the other sort.
+    for (const review of relevance.reviews) {
+      const identity = reviewIdentity(business.id, review);
+      const previous = merged.get(identity);
+      merged.set(identity, previous
+        ? {
+            ...previous,
+            ...review,
+            images: Array.from(new Set([
+              ...(previous.images ?? []),
+              ...(review.images ?? []),
+            ])),
+          }
+        : review);
+    }
+
+    const reviews = Array.from(merged.values()).slice(0, maxReviews);
+    const complete = reviews.length >= primary.targetReviews;
+    return {
+      reviews,
+      place_info: primary.place_info ?? relevance.place_info,
+      dataId: primary.dataId ?? relevance.dataId,
+      fetchedPages: primary.fetchedPages + relevance.fetchedPages,
+      requestsMade: primary.requestsMade + relevance.requestsMade,
+      targetReviews: primary.targetReviews,
+      complete,
+      stopReason: complete ? 'target_reached' : primary.stopReason,
+      pageDiagnostics: [
+        ...primaryDiagnostics,
+        ...withSortDiagnostics(relevance, 'relevance', primary.fetchedPages),
+      ],
+    };
+  } catch (error) {
+    // Keep the successful newest result usable if the supplemental request is
+    // transiently unavailable; the sync remains partial and can be retried.
+    console.warn('[reviews-sync] Relevance fallback failed', {
+      businessId: business.id,
+      placeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ...primary, pageDiagnostics: primaryDiagnostics };
+  }
+}
+
 /**
  * Fetches reviews from Scrape.do and stores them in Supabase.
  *
@@ -59,6 +170,7 @@ export async function syncBusinessReviews(
   options: {
     preserveMissingReviewImages?: boolean;
     preserveUnavailableReviewImages?: boolean;
+    sortBy?: ScrapeDoReviewSort;
   } = {},
 ): Promise<SyncResult> {
   const token = process.env.SCRAPEDO_TOKEN;
@@ -76,7 +188,10 @@ export async function syncBusinessReviews(
   }
 
   // 2. Fetch from Scrape.do (paginated, up to 20 reviews per request).
-  // Sync newest-first so a one-page refresh always captures the latest reviews.
+  // Normal refreshes are newest-first. Targeted image discovery can request a
+  // relevance pass because providers sometimes expose only a small, unpaged
+  // subset and that subset can contain photo reviews absent from `newest`.
+  const requestedSort = options.sortBy ?? 'newest';
   const {
     reviews,
     place_info,
@@ -87,10 +202,13 @@ export async function syncBusinessReviews(
     complete,
     stopReason,
     pageDiagnostics,
-  } = await fetchAllScrapeDoReviews(placeId, token, maxReviews, 'newest', {
-    dataId: business.scrapedo_data_id,
-    expectedReviewCount: business.total_reviews,
-  });
+  } = await fetchReviewsForSync(
+    business,
+    placeId,
+    token,
+    maxReviews,
+    requestedSort,
+  );
 
   console.info('[reviews-sync] Scrape.do pagination completed', {
     businessId: business.id,
@@ -101,6 +219,7 @@ export async function syncBusinessReviews(
     requestsMade,
     complete,
     stopReason,
+    sortsFetched: Array.from(new Set(pageDiagnostics.map((page) => page.sortBy))),
     pageDiagnostics,
   });
 
@@ -108,7 +227,7 @@ export async function syncBusinessReviews(
   // are stable, so refreshes update known rows and insert only new ones.
   const deduped = new Map(
     reviews.map((r) => [
-      r.review_id ?? `${business.id}|${r.user?.name ?? 'anon'}|${r.date ?? ''}|${(r.snippet ?? '').slice(0, 40)}`,
+      reviewIdentity(business.id, r),
       r,
     ])
   );

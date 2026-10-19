@@ -165,6 +165,15 @@ describe('syncBusinessReviews review image storage', () => {
   it('stores mirrored review URLs while leaving the author avatar unchanged', async () => {
     const result = await syncBusinessReviews('place-1', 40);
 
+    expect(mocks.fetchAllScrapeDoReviews).toHaveBeenCalledWith(
+      'place-1',
+      'test-token',
+      40,
+      'newest',
+      expect.any(Object),
+    );
+    expect(mocks.fetchAllScrapeDoReviews).toHaveBeenCalledTimes(1);
+
     expect(mocks.mirrorRefreshedReviewImages).toHaveBeenCalledWith(
       'business-1',
       [{
@@ -196,6 +205,158 @@ describe('syncBusinessReviews review image storage', () => {
     expect(result.reviews[0].authorPhotoUrl).toBe(
       'https://lh3.googleusercontent.com/avatar=s100',
     );
+  });
+
+  it('supports a relevance pass for image discovery', async () => {
+    await syncBusinessReviews('place-1', 40, { sortBy: 'relevance' });
+
+    expect(mocks.fetchAllScrapeDoReviews).toHaveBeenCalledWith(
+      'place-1',
+      'test-token',
+      40,
+      'relevance',
+      expect.any(Object),
+    );
+  });
+
+  it('merges relevance reviews and stores their photos when newest is incomplete', async () => {
+    const storedImage = 'https://project.supabase.co/storage/v1/object/public/review-images/discovered.jpg';
+    const storedNewestImage = 'https://project.supabase.co/storage/v1/object/public/review-images/newest.jpg';
+    mocks.fetchAllScrapeDoReviews
+      .mockResolvedValueOnce({
+        reviews: [{
+          review_id: 'review-1',
+          rating: 5,
+          date: 'today',
+          snippet: 'Newest review',
+          images: ['https://lh3.googleusercontent.com/review=newest-photo'],
+          user: { name: 'Newest Reviewer' },
+        }],
+        place_info: { reviews: 213, rating: 4.9 },
+        dataId: '0x123:0x456',
+        fetchedPages: 1,
+        requestsMade: 3,
+        targetReviews: 213,
+        complete: false,
+        stopReason: 'no_new_reviews',
+        pageDiagnostics: [{
+          pass: 1,
+          page: 1,
+          reviewCount: 1,
+          newReviewCount: 1,
+          attempts: 3,
+          hasNextPageToken: false,
+          identifier: 'data_id',
+        }],
+      })
+      .mockResolvedValueOnce({
+        reviews: [
+          {
+            review_id: 'review-1',
+            rating: 5,
+            date: 'today',
+            snippet: 'Newest review',
+            images: [],
+            user: { name: 'Newest Reviewer' },
+          },
+          {
+            review_id: 'review-with-photo',
+            rating: 5,
+            date: '6 months ago',
+            snippet: 'Historical photo review',
+            images: ['https://lh3.googleusercontent.com/review=discovered'],
+            user: { name: 'Photo Reviewer' },
+          },
+        ],
+        place_info: { reviews: 213, rating: 4.9 },
+        dataId: '0x123:0x456',
+        fetchedPages: 1,
+        requestsMade: 3,
+        targetReviews: 213,
+        complete: false,
+        stopReason: 'no_new_reviews',
+        pageDiagnostics: [{
+          pass: 1,
+          page: 1,
+          reviewCount: 2,
+          newReviewCount: 2,
+          attempts: 3,
+          hasNextPageToken: false,
+          identifier: 'data_id',
+        }],
+      });
+    mocks.mirrorRefreshedReviewImages.mockImplementationOnce(async (_businessId, reviews) => ({
+      reviews: reviews.map((review: { reviewId: string }) => ({
+        reviewId: review.reviewId,
+        images: review.reviewId === 'review-with-photo' ? [storedImage] : [storedNewestImage],
+      })),
+      attemptedImages: 2,
+      storedImages: 2,
+      failedImages: 0,
+      preservedImages: 0,
+    }));
+
+    const result = await syncBusinessReviews('place-1', 500);
+
+    expect(mocks.fetchAllScrapeDoReviews).toHaveBeenNthCalledWith(
+      1,
+      'place-1',
+      'test-token',
+      500,
+      'newest',
+      expect.any(Object),
+    );
+    expect(mocks.fetchAllScrapeDoReviews).toHaveBeenNthCalledWith(
+      2,
+      'place-1',
+      'test-token',
+      500,
+      'relevance',
+      expect.objectContaining({ dataId: '0x123:0x456' }),
+    );
+    expect(mocks.mirrorRefreshedReviewImages).toHaveBeenCalledWith(
+      'business-1',
+      expect.arrayContaining([
+        {
+          reviewId: 'review-1',
+          images: ['https://lh3.googleusercontent.com/review=newest-photo'],
+          previousImages: ['https://lh3.googleusercontent.com/review=old'],
+        },
+        {
+          reviewId: 'review-with-photo',
+          images: ['https://lh3.googleusercontent.com/review=discovered'],
+          previousImages: [],
+        },
+      ]),
+      expect.any(Object),
+    );
+    expect(mocks.reviewUpsert).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          google_review_id: 'review-with-photo',
+          images: [storedImage],
+        }),
+      ]),
+      { onConflict: 'google_review_id' },
+    );
+    expect(result).toMatchObject({
+      reviewsFetched: 2,
+      targetReviews: 213,
+      complete: false,
+      stopReason: 'no_new_reviews',
+      pagesFetched: 2,
+      requestsMade: 6,
+      imageStorage: {
+        attemptedImages: 2,
+        storedImages: 2,
+        failedImages: 0,
+        preservedImages: 0,
+      },
+    });
+    expect(result.pageDiagnostics.map((page) => page.sortBy)).toEqual([
+      'newest',
+      'relevance',
+    ]);
   });
 
   it('can preserve unavailable historical URLs during a 403 migration refresh', async () => {

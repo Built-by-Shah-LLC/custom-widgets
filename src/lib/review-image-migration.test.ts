@@ -79,6 +79,7 @@ describe('review image migration', () => {
     expect(refresh).toHaveBeenCalledWith('place-1', 500, {
       preserveMissingReviewImages: true,
       preserveUnavailableReviewImages: false,
+      sortBy: 'newest',
     });
     expect(backfill).toHaveBeenCalledTimes(2);
     expect(migration).toMatchObject({
@@ -141,6 +142,140 @@ describe('review image migration', () => {
 
     expect(refresh).not.toHaveBeenCalled();
     expect(migration).toMatchObject({ refreshTriggered: false, complete: false });
+  });
+
+  it('discovers photo reviews by relevance when the stored company has no review images', async () => {
+    const discoveredReviews = [{
+      id: 'review-with-photo',
+      authorName: 'Photo Reviewer',
+      rating: 5,
+      text: 'See photo',
+      relativeTime: 'today',
+      images: ['https://project.supabase.co/storage/photo.jpg'],
+    }];
+    const empty = result({
+      candidateReviews: 0,
+      candidateImages: 0,
+      attemptedImages: 0,
+      failedImages: 0,
+      preservedImages: 0,
+      remainingGoogleImages: 0,
+      failures: [],
+      reviews: [],
+    });
+    const backfill = vi.fn()
+      .mockResolvedValueOnce(empty)
+      .mockResolvedValueOnce(result({
+        candidateReviews: 0,
+        candidateImages: 0,
+        attemptedImages: 0,
+        storedImages: 0,
+        failedImages: 0,
+        preservedImages: 0,
+        remainingGoogleImages: 0,
+        failures: [],
+        reviews: discoveredReviews,
+      }));
+    const refresh = vi.fn(async () => ({
+      widgetIds: ['widget-with-discovered-photo'],
+      imageStorage: {
+        attemptedImages: 1,
+        storedImages: 1,
+        failedImages: 0,
+        preservedImages: 0,
+      },
+      imageValidation: {
+        checkedImages: 0,
+        removedImages: 0,
+        changedReviews: 0,
+      },
+    }));
+
+    const migration = await migrateBusinessReviewImages('business-1', { backfill, refresh });
+
+    expect(refresh).toHaveBeenCalledWith('place-1', 500, {
+      preserveMissingReviewImages: true,
+      preserveUnavailableReviewImages: false,
+      sortBy: 'relevance',
+    });
+    expect(migration).toMatchObject({
+      refreshTriggered: true,
+      candidateImages: 1,
+      storedImages: 1,
+      verifiedImages: 1,
+      complete: true,
+      reviews: discoveredReviews,
+    });
+  });
+
+  it('does not rediscover or redownload when stored review photos already use Supabase', async () => {
+    const backfill = vi.fn(async () => result({
+      candidateReviews: 0,
+      candidateImages: 0,
+      attemptedImages: 0,
+      storedImages: 0,
+      failedImages: 0,
+      preservedImages: 0,
+      remainingGoogleImages: 0,
+      failures: [],
+      reviews: [{
+        id: 'review-1',
+        authorName: 'Reviewer',
+        rating: 5,
+        text: 'Great',
+        relativeTime: 'today',
+        images: ['https://project.supabase.co/storage/photo.jpg'],
+      }],
+    }));
+    const refresh = vi.fn();
+
+    const migration = await migrateBusinessReviewImages('business-1', { backfill, refresh });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(migration).toMatchObject({
+      refreshTriggered: false,
+      candidateImages: 0,
+      storedImages: 0,
+      complete: true,
+    });
+  });
+
+  it('does not report a failed discovered photo as stored', async () => {
+    const empty = result({
+      candidateReviews: 0,
+      candidateImages: 0,
+      attemptedImages: 0,
+      failedImages: 0,
+      preservedImages: 0,
+      remainingGoogleImages: 0,
+      failures: [],
+      reviews: [],
+    });
+    const backfill = vi.fn().mockResolvedValue(empty);
+    const refresh = vi.fn(async () => ({
+      widgetIds: [],
+      imageStorage: {
+        attemptedImages: 1,
+        storedImages: 0,
+        failedImages: 1,
+        preservedImages: 0,
+      },
+      imageValidation: {
+        checkedImages: 0,
+        removedImages: 0,
+        changedReviews: 0,
+      },
+    }));
+
+    const migration = await migrateBusinessReviewImages('business-1', { backfill, refresh });
+
+    expect(migration).toMatchObject({
+      candidateImages: 1,
+      storedImages: 0,
+      verifiedImages: 0,
+      failedImages: 1,
+      complete: false,
+    });
   });
 
   it('reports a refresh failure without losing the preserved original URL', async () => {
