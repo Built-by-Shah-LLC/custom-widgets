@@ -185,26 +185,21 @@ export function GoogleReviewsWidget({
   const [isOpen, setIsOpen] = useState(false);
   const [hover, setHover] = useState(false);
 
-  const businessInfo: BusinessInfo = business ?? {
-    name: 'SSR Diesel Repairs',
-    address: '',
-    totalReviews: 126,
-    averageRating: 4.0,
-  };
+  if (!business) return null;
 
   const displayName =
     config.customBusinessNameEnabled && config.customBusinessName
       ? config.customBusinessName
-      : businessInfo.name;
+      : business.name;
 
-  const fullStars = Math.floor(businessInfo.averageRating);
-  const hasHalfStar = businessInfo.averageRating % 1 >= 0.5;
+  const fullStars = Math.floor(business.averageRating);
+  const hasHalfStar = business.averageRating % 1 >= 0.5;
   const styles = buildBadgeStyles(config);
   const horizontal = config.layout === 'horizontal';
 
   const subtitleParts: string[] = [];
   if (config.badgeShowBusinessName) subtitleParts.push(displayName);
-  if (config.badgeShowReviewCount) subtitleParts.push(`${businessInfo.totalReviews} reviews`);
+  if (config.badgeShowReviewCount) subtitleParts.push(`${business.totalReviews} reviews`);
 
   const subtitleEl =
     subtitleParts.length > 0 ? (
@@ -259,7 +254,7 @@ export function GoogleReviewsWidget({
             <>
               <GoogleLogo size={config.googleIconSize} />
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={styles.rating}>{businessInfo.averageRating.toFixed(1)}</span>
+                <span style={styles.rating}>{business.averageRating.toFixed(1)}</span>
                 <div style={{ display: 'flex' }}>
                   {Array.from({ length: 5 }).map((_, i) => (
                     <Star
@@ -283,7 +278,7 @@ export function GoogleReviewsWidget({
             <>
               <GoogleLogo size={config.googleIconSize} />
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={styles.rating}>{businessInfo.averageRating.toFixed(1)}</span>
+                <span style={styles.rating}>{business.averageRating.toFixed(1)}</span>
                 <div style={{ display: 'flex' }}>
                   {Array.from({ length: 5 }).map((_, i) => (
                     <Star
@@ -313,7 +308,7 @@ export function GoogleReviewsWidget({
           onClose={() => setIsOpen(false)}
           widgetId={widgetId}
           config={config}
-          business={businessInfo}
+          business={business}
           reviews={reviews}
           apiOrigin={apiOrigin}
         />

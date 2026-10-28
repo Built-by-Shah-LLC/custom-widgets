@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { GoogleReviewsPanel } from './GoogleReviewsPanel';
+import { GoogleReviewsWidget } from './GoogleReviewsWidget';
 
 const business = {
   name: 'Test Business',
@@ -31,5 +32,15 @@ describe('GoogleReviewsPanel review states', () => {
     }));
 
     expect(markup).toContain('Loading reviews');
+  });
+});
+
+describe('GoogleReviewsWidget business data', () => {
+  it('renders nothing when business data is missing', () => {
+    const markup = renderToStaticMarkup(createElement(GoogleReviewsWidget, {
+      preview: true,
+    }));
+
+    expect(markup).toBe('');
   });
 });
