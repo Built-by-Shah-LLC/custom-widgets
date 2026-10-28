@@ -9,7 +9,7 @@ import { SettingsIcon } from '@/components/SettingsIcon';
 export interface EditorTabDef {
   id: string;
   label: string;
-  icon: ReactNode;
+  icon?: ReactNode;
 }
 
 export interface EditorTabMeta {

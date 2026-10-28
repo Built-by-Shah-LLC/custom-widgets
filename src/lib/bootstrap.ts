@@ -12,7 +12,6 @@ import type { BusinessInfo } from './reviews-data';
 export const BOOTSTRAP_SCHEMA_VERSION = 1 as const;
 export const BOOTSTRAP_READY_EVENT = 'bbs:widget-data-ready';
 export const BOOTSTRAP_READY_HOOK = '__BBS_WIDGET_DATA_READY__';
-export const ORIGIN_DATA_GLOBAL = '__BBS_WIDGET_DATA_BY_ORIGIN__';
 
 const BOOTSTRAP_TIMEOUT_MS = 10_000;
 const MAX_BOOTSTRAP_ATTEMPTS = 2;
