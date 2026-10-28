@@ -6,6 +6,7 @@ import {
   isReviewImageWidgetId,
   parseGoogleReviewImageUrl,
 } from '@/lib/review-images';
+import { clientIp, createRateLimiter } from '@/lib/rate-limit';
 
 const IMAGE_CACHE_SECONDS = 31_536_000;
 const PUBLIC_IMAGE_CACHE = `public, max-age=${IMAGE_CACHE_SECONDS}, s-maxage=${IMAGE_CACHE_SECONDS}, immutable`;
@@ -15,11 +16,12 @@ const UPSTREAM_TIMEOUT_MS = 10_000;
 const CONTEXT_LOOKUP_TIMEOUT_MS = 1_500;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 120;
-const RATE_LIMIT_MAX_ENTRIES = 10_000;
 const LOG_PREFIX = '[review-image-proxy]';
 
-const rateLimitHits = new Map<string, { count: number; resetAt: number }>();
-let nextRateLimitPruneAt = 0;
+const rateLimited = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  maxHits: RATE_MAX,
+});
 
 type ErrorLike = {
   name?: unknown;
@@ -73,43 +75,6 @@ function reviewImageRequestContext(request: Request): ReviewImageRequestContext 
     widgetId: params.get('widgetId'),
     reviewId: params.get('reviewId'),
   };
-}
-
-function clientIp(request: Request): string {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown'
-  );
-}
-
-/**
- * Per-instance protection for a public proxy endpoint. This deliberately
- * permits a full review gallery to retry through the proxy during a Google
- * outage; Vercel WAF rate limiting remains the cross-instance safeguard.
- */
-function rateLimited(request: Request): boolean {
-  const now = Date.now();
-  if (now >= nextRateLimitPruneAt) {
-    for (const [ip, entry] of rateLimitHits) {
-      if (entry.resetAt <= now) rateLimitHits.delete(ip);
-    }
-    nextRateLimitPruneAt = now + RATE_WINDOW_MS;
-  }
-
-  const ip = clientIp(request);
-  const existing = rateLimitHits.get(ip);
-  if (!existing || existing.resetAt <= now) {
-    if (rateLimitHits.size >= RATE_LIMIT_MAX_ENTRIES) {
-      const oldestIp = rateLimitHits.keys().next().value;
-      if (oldestIp) rateLimitHits.delete(oldestIp);
-    }
-    rateLimitHits.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-
-  existing.count += 1;
-  return existing.count > RATE_MAX;
 }
 
 function widgetSurface(widgetType: string | null): 'badge' | 'carousel' | null {
@@ -368,7 +333,9 @@ export async function GET(request: Request) {
     });
   }
 
-  if (rateLimited(request)) return rateLimitedResponse();
+  // Allow a full review gallery to retry during an upstream outage. Vercel
+  // WAF remains the cross-instance safeguard.
+  if (rateLimited(clientIp(request))) return rateLimitedResponse();
   const requestContext = reviewImageRequestContext(request);
 
   let upstream: Response;
