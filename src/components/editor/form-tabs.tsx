@@ -283,9 +283,6 @@ function FieldEditor({
   const isStaticOrHidden = field.type === 'static-text' || field.type === 'hidden';
   const isCheckbox = field.type === 'checkbox-group';
   const v = field.validation ?? {};
-  const vFields = isCheckbox
-    ? { minSelections: v.minSelections, maxSelections: v.maxSelections }
-    : { minLength: v.minLength, maxLength: v.maxLength, pattern: v.pattern };
 
   return (
     <div className="mb-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-3">

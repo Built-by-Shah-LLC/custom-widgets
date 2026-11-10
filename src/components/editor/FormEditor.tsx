@@ -10,7 +10,6 @@ import type {
 import {
   defaultFormField,
   formToDbRow,
-  makeFieldId,
   makeOptionId,
   makeStepId,
 } from '@/lib/form-config';
