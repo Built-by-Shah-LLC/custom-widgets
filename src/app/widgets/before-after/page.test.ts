@@ -1,3 +1,4 @@
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -12,9 +13,26 @@ vi.mock('@/lib/before-after-config', () => ({
   beforeAfterFromDbRow: vi.fn((row) => row),
 }));
 
-vi.mock('@/components/editor/BeforeAfterEditor', () => ({
-  BeforeAfterEditor: vi.fn(() => null),
-}));
+vi.mock('@/components/editor/BeforeAfterEditor', async () => {
+  const { createElement: create } = await import('react');
+  return {
+    BeforeAfterEditor: ({
+      items,
+      initialSelectedId,
+    }: {
+      items: Array<{ widgetId: string; widgetName: string }>;
+      initialSelectedId?: string;
+    }) => create(
+      'section',
+      { 'data-selected-id': initialSelectedId ?? '' },
+      items.map((item) => create(
+        'div',
+        { key: item.widgetId, 'data-widget-id': item.widgetId },
+        item.widgetName
+      ))
+    ),
+  };
+});
 
 import BeforeAfterWidgetPage from './page';
 
@@ -45,10 +63,12 @@ describe('BeforeAfterWidgetPage', () => {
     const page = await BeforeAfterWidgetPage({
       searchParams: Promise.resolve({ id: 'widget-1' }),
     });
+    const markup = renderToStaticMarkup(page);
 
     expect(selected.eq).toHaveBeenCalledWith('id', 'widget-1');
     expect(mocks.from).toHaveBeenCalledTimes(1);
-    expect(page.props.items).toHaveLength(1);
+    expect(markup).toContain('data-widget-id="widget-1"');
+    expect(markup).toContain('Selected');
   });
 
   it('falls back to the first widget for a stale selected id', async () => {
@@ -61,9 +81,11 @@ describe('BeforeAfterWidgetPage', () => {
     const page = await BeforeAfterWidgetPage({
       searchParams: Promise.resolve({ id: 'missing' }),
     });
+    const markup = renderToStaticMarkup(page);
 
     expect(fallback.order).toHaveBeenCalledWith('created_at', { ascending: true });
-    expect(page.props.items).toHaveLength(1);
-    expect(page.props.items[0].widgetId).toBe('widget-2');
+    expect(markup).toContain('data-widget-id="widget-2"');
+    expect(markup).toContain('Fallback');
+    expect(markup).not.toContain('data-widget-id="missing"');
   });
 });
