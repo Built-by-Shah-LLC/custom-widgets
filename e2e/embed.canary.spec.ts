@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 import {
   expectShadowMounted,
   GARYS_WIDGET_IDS,
@@ -56,7 +56,5 @@ test.describe('canary embed-site-seven', () => {
       GARYS_WIDGET_IDS.beforeAfterAudi,
       { timeout: 30_000 }
     );
-
-    expect(true).toBe(true);
   });
 });

@@ -193,10 +193,6 @@ export function validateE2EEnvironment(
   return null;
 }
 
-export function isKnownProductionSupabaseUrl(value: string | undefined): boolean {
-  return projectRefFromUrl(cleanUrl(value)) === KNOWN_PRODUCTION_SUPABASE_REF;
-}
-
 export function isExplicitlyAllowlistedSupabaseUrl(
   env: E2EEnvironment
 ): boolean {

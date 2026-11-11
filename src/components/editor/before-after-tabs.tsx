@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { BeforeAfterConfig } from '@/lib/before-after-config';
 import { Input as KitInput } from '@/components/ui';
 import {
@@ -383,23 +383,14 @@ function ClearableSecondsInput({
   max?: number;
   onChange: (v: number) => void;
 }) {
-  const [text, setText] = useState(value >= 1 ? String(value) : '');
-
-  // Sync with external value changes (e.g. switching widgets) without
-  // clobbering an in-progress edit.
-  useEffect(() => {
-    setText((t) => (Number(t) === value || (t === '' && value < 1) ? t : String(value)));
-  }, [value]);
-
   return (
     <KitInput
       type="number"
-      value={text}
+      value={value >= 1 ? value : ''}
       min={min}
       max={max}
       onChange={(e) => {
         const v = e.target.value;
-        setText(v);
         onChange(v === '' ? 0 : Number(v));
       }}
     />

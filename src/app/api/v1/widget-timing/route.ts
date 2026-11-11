@@ -15,31 +15,16 @@ import {
   parseTimingHost,
   timingHostMatchesCaller,
 } from '@/lib/widget-timing';
+import { clientIp, createRateLimiter } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 10;
-const hits = new Map<string, { count: number; resetAt: number }>();
-
-function clientIp(request: Request): string {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown'
-  );
-}
-
-function rateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = hits.get(ip);
-  if (!entry || entry.resetAt <= now) {
-    hits.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-  entry.count += 1;
-  return entry.count > RATE_MAX;
-}
+const rateLimited = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  maxHits: RATE_MAX,
+});
 
 function noStore(status: number, body?: Record<string, string>) {
   if (body) {

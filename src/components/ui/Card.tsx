@@ -88,34 +88,4 @@ export function CardDescription({
   );
 }
 
-export function CardBody({
-  className,
-  children,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div className={cn('', className)} {...props}>
-      {children}
-    </div>
-  );
-}
-
-export function CardFooter({
-  className,
-  children,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn(
-        'flex items-center justify-end gap-3 mt-4 pt-4 border-t border-[var(--color-border-light)]',
-        className
-      )}
-      {...props}
-    >
-      {children}
-    </div>
-  );
-}
-
 export default Card;
