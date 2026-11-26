@@ -1,5 +1,4 @@
 import { config } from 'dotenv';
-import { readFileSync } from 'node:fs';
 
 // Load .env.local first, fallback to .env
 try {

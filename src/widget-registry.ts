@@ -94,7 +94,3 @@ export function getBootstrappedWidgetComponent(data: BootstrapData): WidgetCompo
       return GoogleReviewsEmbed as WidgetComponent;
   }
 }
-
-export function listWidgetIds(): string[] {
-  return Object.keys(registry);
-}

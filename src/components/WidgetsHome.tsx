@@ -360,10 +360,6 @@ function WidgetCard({
 }) {
   const router = useRouter();
 
-  useEffect(() => {
-    router.prefetch(editHref);
-  }, [editHref, router]);
-
   return (
     <div className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-3 shadow-[var(--shadow-sm)] transition-shadow hover:shadow-[var(--shadow-md)]">
       {/* Preview with hover actions */}
@@ -418,6 +414,8 @@ function WidgetCard({
           size="sm"
           fullWidth
           onClick={() => router.push(editHref)}
+          onMouseEnter={() => router.prefetch(editHref)}
+          onFocus={() => router.prefetch(editHref)}
           iconLeft={
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />

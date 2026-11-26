@@ -155,7 +155,7 @@ interface GoogleReviewsPanelProps {
   onClose: () => void;
   widgetId?: string;
   config?: WidgetConfig;
-  business?: BusinessInfo;
+  business: BusinessInfo;
   reviews?: Review[];
   apiOrigin?: string;
 }
@@ -193,20 +193,13 @@ export function GoogleReviewsPanel({
     };
   }, [isOpen, config.drawerReviewsPerPage]);
 
-  const businessInfo: BusinessInfo = business ?? {
-    name: 'SSR Diesel Repairs',
-    address: '',
-    totalReviews: 126,
-    averageRating: 4.0,
-  };
-
   const displayName =
     config.customBusinessNameEnabled && config.customBusinessName
       ? config.customBusinessName
-      : businessInfo.name;
+      : business.name;
 
-  const fullStars = Math.floor(businessInfo.averageRating);
-  const hasHalfStar = businessInfo.averageRating % 1 >= 0.5;
+  const fullStars = Math.floor(business.averageRating);
+  const hasHalfStar = business.averageRating % 1 >= 0.5;
 
   const reviewItems = reviews ?? EMPTY_REVIEWS;
 
@@ -334,7 +327,7 @@ export function GoogleReviewsPanel({
                 <GoogleLogo size={18} />
                 <span style={{ fontSize: '15px', color: config.drawerTextColor }}>Google</span>
                 <span style={{ fontSize: '15px', fontWeight: 700, color: config.drawerTextColor }}>
-                  {businessInfo.averageRating.toFixed(1)}
+                  {business.averageRating.toFixed(1)}
                 </span>
               </div>
 
@@ -364,7 +357,7 @@ export function GoogleReviewsPanel({
                   }}
                 >
                   <span style={{ fontSize: '28px', fontWeight: 700, color: config.drawerTextColor }}>
-                    {businessInfo.averageRating.toFixed(1)}
+                    {business.averageRating.toFixed(1)}
                   </span>
                   {config.drawerShowStarRatings && (
                     <div style={{ display: 'flex', gap: '2px' }}>
@@ -379,7 +372,7 @@ export function GoogleReviewsPanel({
                     </div>
                   )}
                   <span style={{ fontSize: '15px', opacity: 0.55 }}>
-                    ({businessInfo.totalReviews})
+                    ({business.totalReviews})
                   </span>
                 </div>
               )}

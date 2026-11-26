@@ -9,7 +9,7 @@ import { SettingsIcon } from '@/components/SettingsIcon';
 export interface EditorTabDef {
   id: string;
   label: string;
-  icon: ReactNode;
+  icon?: ReactNode;
 }
 
 export interface EditorTabMeta {
@@ -18,7 +18,7 @@ export interface EditorTabMeta {
 }
 
 /**
- * Shared chrome for the three widget editors: header (back + title),
+ * Shared chrome for the widget editors: header (back + title),
  * icon tab rail, settings panel (tab meta header + scrollable body +
  * save button bar), and the live preview pane. All tab state, config
  * contracts, save fetches, and preview mounts live in the caller.

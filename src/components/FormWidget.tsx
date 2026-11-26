@@ -98,8 +98,9 @@ export function FormWidget({
     setAnswers((a) => ({ ...a, [fieldId]: value }));
     setErrors((e) => {
       if (!e[fieldId]) return e;
-      const { [fieldId]: _dropped, ...rest } = e;
-      return rest;
+      const next = { ...e };
+      delete next[fieldId];
+      return next;
     });
   };
 
@@ -271,13 +272,11 @@ export function FormWidget({
             data-bbs-prev
             onClick={retry}
             style={{
-              ...buttonStyle(
-                config.buttonBackgroundColor,
-                config.buttonTextColor,
-                config.buttonHoverColor
-              ),
+              ...buttonStyle(config.buttonBackgroundColor, config.buttonTextColor),
               padding: '12px 24px',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = config.buttonHoverColor)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = config.buttonBackgroundColor)}
           >
             Try Again
           </button>
@@ -291,7 +290,7 @@ export function FormWidget({
   }
 
   const fields = visibleFields(step);
-  const inputStyle = (field: FormField): CSSProperties => ({
+  const inputStyle: CSSProperties = {
     width: '100%',
     boxSizing: 'border-box',
     padding: '12px 14px',
@@ -304,7 +303,7 @@ export function FormWidget({
     borderRadius: `${config.inputBorderRadius}px`,
     outline: 'none',
     transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-  });
+  };
 
   const labelStyle: CSSProperties = {
     display: 'block',
@@ -324,7 +323,7 @@ export function FormWidget({
       'data-bbs-field': field.id,
       'aria-invalid': error ? true : undefined,
       style: {
-        ...inputStyle(field),
+        ...inputStyle,
         ...(error ? { borderColor: config.errorColor } : {}),
         ...(field.styleOverrides ?? {}),
       } as CSSProperties,
@@ -838,11 +837,7 @@ function ErrorText({ config, message }: { config: FormConfig; message: string })
   );
 }
 
-function buttonStyle(
-  background: string,
-  color: string,
-  hover: string
-): CSSProperties {
+function buttonStyle(background: string, color: string): CSSProperties {
   return {
     background,
     color,

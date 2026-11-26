@@ -15,9 +15,8 @@ import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 
 /* ------------------------------------------------------------------ */
-/* Shared control metrics — extracted verbatim from Input.tsx so the  */
-/* combobox family (SearchSelect / MultiSearchSelect / PhoneInput)    */
-/* matches the field family exactly. Do not re-author these values.   */
+/* Shared control metrics used by PhoneInput to match Input exactly.  */
+/* Do not re-author these values.                                     */
 /* ------------------------------------------------------------------ */
 
 export type InputSize = 'sm' | 'md' | 'lg';

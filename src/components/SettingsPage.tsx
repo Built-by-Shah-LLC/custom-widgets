@@ -69,7 +69,11 @@ export function SettingsPage({ initialDomains, recentLoads }: SettingsPageProps)
         return;
       }
 
-      const { liveCacheWarning: _ignored, ...domain } = data;
+      const domain: AllowedDomain = {
+        id: data.id,
+        domain: data.domain,
+        created_at: data.created_at,
+      };
       setDomains((prev) => [...prev, domain]);
       setInput('');
       showSaveResult(data, 'Domain added');
@@ -107,7 +111,11 @@ export function SettingsPage({ initialDomains, recentLoads }: SettingsPageProps)
         return;
       }
 
-      const { liveCacheWarning: _ignored, ...domain } = data;
+      const domain: AllowedDomain = {
+        id: data.id,
+        domain: data.domain,
+        created_at: data.created_at,
+      };
       setDomains((prev) => prev.map((d) => (d.id === id ? domain : d)));
       setEditingId(null);
       setEditValue('');

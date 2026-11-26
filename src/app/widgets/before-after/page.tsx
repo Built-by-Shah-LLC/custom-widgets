@@ -18,10 +18,26 @@ export default async function BeforeAfterWidgetPage({
 }) {
   const { id } = await searchParams;
 
-  const { data: widgets } = await supabase
-    .from('before_after_widgets')
-    .select('*')
-    .order('created_at', { ascending: true });
+  let widgets = null;
+  if (id) {
+    const selected = await supabase
+      .from('before_after_widgets')
+      .select('*')
+      .eq('id', id)
+      .limit(1);
+    widgets = selected.data;
+  }
+
+  // Preserve the direct /widgets/before-after and stale-link behavior by
+  // falling back to the first widget when no selected row exists.
+  if (!widgets?.length) {
+    const fallback = await supabase
+      .from('before_after_widgets')
+      .select('*')
+      .order('created_at', { ascending: true })
+      .limit(1);
+    widgets = fallback.data;
+  }
 
   const items: BeforeAfterEditorWidget[] = (widgets ?? []).map((w) => ({
     widgetId: w.id,
