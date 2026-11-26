@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run watch:widget\" \"next dev\"",
-    "build": "npm run build:widget && next build",
+    "build": "npm run build:widget && node scripts/check-widget-bundle.mjs && next build",
     "build:widget": "node scripts/build-widget.mjs",
     "watch:widget": "node scripts/build-widget.mjs --watch",
     "migrate": "node scripts/apply-migration.mjs",

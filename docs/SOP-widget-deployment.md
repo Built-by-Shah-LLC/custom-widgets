@@ -1,7 +1,7 @@
 # SOP — Widget Deployment (BuiltByShah Custom Widgets)
 
 **Owner:** Hassan
-**Last updated:** 2026-10-11
+**Last updated:** 2026-11-27
 **Repo:** `custom-widgets` (Next.js + Supabase + esbuild embed bundle)
 
 This is the standard operating procedure for deploying review widgets to a new
@@ -164,10 +164,19 @@ npm run lint
 npm run build
 ```
 
-Validate on an isolated Vercel preview before deploying production. Verify
-renderer CDN HITs, current data after an ordinary reload, domain rejection,
-and both stable and historical script aliases. A local passing test does not
-establish Vercel cache behavior.
+Validate on an isolated Vercel preview before deploying production. Check
+`/api/embeds/widget.js`, `/widget.js`, and a historical
+`/widget.<16-hex-digits>.js` URL with GET, HEAD, and matching `If-None-Match`.
+All three must serve identical current bundle bytes, the configured CORS,
+timing, content type, nosniff and revalidation headers, and an ETag/304.
+Verify Brotli and a CDN HIT on repeated requests, zero function or middleware
+invocations, and fresh bundle bytes immediately after a new preview deploy.
+Compare cold first-request TTFB from at least two regions and check that the
+rendererMs timing beacon still populates. Also check current data after an
+ordinary reload and domain rejection. A local passing test does not establish
+Vercel cache behavior. If the static rewrite fails this gate, use a static
+route (`dynamic = 'force-static'`, with no request access) only after its build
+output shows `○ (Static)` and the same preview checks pass.
 
 Then deploy the app (Vercel: push/merge to `main` triggers deployment;
 production URL: `https://builtbyshahwidgets.com`). The build produces
@@ -211,7 +220,7 @@ Notes:
   cause one extra request. Page builders should insert fresh placeholders,
   without copying a rendered node's `data-bbs-mounted` marker.
 - `/widget.js` and historical `/widget.<hash>.js` aliases resolve to the current
-  renderer before static files. Check any customer-supplied `integrity` hash or
+  renderer from the generated static file. Check any customer-supplied `integrity` hash or
   CSP pin before a renderer update; bytes pinned by a site cannot change freely.
 - `data-designdetail-embed` and `data-custom-widget` attributes also work
   (legacy support) — always use `data-bbs-embed` for new embeds.
@@ -234,8 +243,8 @@ On the **live client page** (not just the test harness):
 
 ## 8. Ongoing maintenance
 
-The implemented transport targets Vercel Hobby. The shared renderer requests
-one day of Vercel CDN freshness and browser revalidation. Mutable bootstrap and
+The implemented transport targets Vercel Hobby. The shared renderer is served
+as a static asset with browser revalidation on each load. Mutable bootstrap and
 legacy JSON data use no-store, with a fresh allowed-domain read. There is no
 cron, publication queue, database migration or paid cache service in this
 transport. A successful database save needs no separate publication action;
