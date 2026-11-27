@@ -243,13 +243,14 @@ On the **live client page** (not just the test harness):
 
 ## 8. Ongoing maintenance
 
-The implemented transport targets Vercel Hobby. The shared renderer is served
-as a static asset with browser revalidation on each load. Mutable bootstrap and
-legacy JSON data use no-store, with a fresh allowed-domain read. There is no
-cron, publication queue, database migration or paid cache service in this
-transport. A successful database save needs no separate publication action;
-the next successful new page load reads current data. Already-open widgets
-retain their initial data until reloaded.
+The shared renderer is served as a static asset with browser revalidation on
+each load. An allowed client's `data.js` response carries a strong body ETag;
+matching conditional requests return an empty `304` after the current data and
+domain policy are checked. Headerless `data.js` requests remain `200` with
+`no-store`, and blocked origins remain `403`. Saves purge the affected widget
+cache tags once without sending server-side `data.js` warm requests. Domain
+edits list the three widget tables and purge their tags in one batch. Already
+open widgets retain their initial data until reloaded.
 
 Forms carry the rendered schema fingerprint back to the submission endpoint.
 If field meanings or rules changed while the form was open, the server rejects
@@ -257,10 +258,10 @@ the stale submission before storage or delivery and asks the visitor to reload.
 Older cached renderers without a fingerprint keep server-side answer validation,
 but cannot detect every semantic change to an otherwise identical field.
 
-Long-lived data caching remains unfinished. It must not be enabled until a
-separately reviewed design proves next-load freshness and domain revocation.
-Uncached data still incurs origin/database latency and uses Vercel function
-quota; measure real usage and cold/warm timing before claiming a speedup.
+Longer browser TTLs remain out of scope. A `304` avoids sending the body but
+still needs origin/database work when the CDN revalidates. Measure real cache
+HIT ratio, request latency, and `Referer` variation before claiming an overall
+render-speed improvement or changing cache keys.
 
 During the first rollout, account for previously cached data (the old policy
 had 60 seconds of browser freshness and a CDN stale window). New headers cannot
