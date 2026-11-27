@@ -2,20 +2,14 @@ import { NextResponse } from 'next/server';
 import { NO_STORE_HEADERS } from './cache-headers';
 import { listAllEmbedWidgetIds } from './embed-widget-ids';
 import { laggingCache, withLiveCacheWarning, type LiveCacheResult } from './live-cache-warning';
-import { publishWidgetCache, resolveWidgetPublishHost } from './publish-widget-cache';
+import { publishWidgetCache } from './publish-widget-cache';
 
 export async function publishEmbedWidgets(
-  request: Request,
+  _request: Request,
   widgetIds: string[]
 ): Promise<LiveCacheResult> {
   try {
-    return await publishWidgetCache(
-      widgetIds,
-      resolveWidgetPublishHost(new URL(request.url).origin, {
-        VERCEL_ENV: process.env.VERCEL_ENV,
-        VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
-      })
-    );
+    return await publishWidgetCache(widgetIds);
   } catch {
     return laggingCache();
   }

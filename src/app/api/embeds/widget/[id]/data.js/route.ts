@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { supabase } from '@/lib/db';
 import {
   AllowedDomainsUnavailableError,
@@ -143,13 +144,24 @@ export async function GET(
     ? { ...publicWidgetDataHeaders(id), Vary: 'Origin, Referer' }
     : noStoreHeaders();
 
-  return new NextResponse(body, {
-    headers: {
-      ...cacheHeaders,
-      'Content-Type': 'application/javascript; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff',
-      'Access-Control-Allow-Origin': '*',
-      'Timing-Allow-Origin': '*',
-    },
-  });
+  const headers = {
+    ...cacheHeaders,
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+    'Access-Control-Allow-Origin': '*',
+    'Timing-Allow-Origin': '*',
+    ...(origin ? { ETag: `"${createHash('sha256').update(body).digest('hex')}"` } : {}),
+  };
+
+  // Check admission and construct the current payload before revalidating so
+  // a revoked origin or a changed widget cannot reuse an older response.
+  const ifNoneMatch = request.headers.get('if-none-match');
+  if (origin && ifNoneMatch?.split(',').some((value) => {
+    const tag = value.trim().replace(/^W\//i, '');
+    return tag === '*' || tag === headers.ETag;
+  })) {
+    return new NextResponse(null, { status: 304, headers });
+  }
+
+  return new NextResponse(body, { headers });
 }
