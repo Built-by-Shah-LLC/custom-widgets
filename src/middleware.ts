@@ -5,12 +5,6 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 /** Embed script + bootstrap data — no session required. */
 function isPublicEmbedPath(pathname: string, method: string): boolean {
   const upperMethod = method.toUpperCase();
-  const isScriptAlias =
-    pathname === '/api/embeds/widget.js' ||
-    pathname === '/widget.js' ||
-    /^\/widget\.[a-f0-9]{16}\.js$/.test(pathname);
-  if (isScriptAlias) return upperMethod === 'GET' || upperMethod === 'HEAD';
-
   return (
     pathname === '/widget-manifest.json' ||
     pathname.startsWith('/api/embeds/widget/')
@@ -130,6 +124,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/embeds/widget\\.js$|widget\\.js$|widget\\.[a-f0-9]{16}\\.js$|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

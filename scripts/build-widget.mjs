@@ -10,10 +10,9 @@ const publicDir = path.resolve(__dirname, '../public');
 const bundlePath = path.join(publicDir, 'widget.js');
 const manifestPath = path.join(publicDir, 'widget-manifest.json');
 
-// NOTE: The bundle is served to client sites only via the stable route
-// /api/embeds/widget.js. Hashed widget.<hash>.js copies were removed because
-// every redeploy changed the hash and 404'd embed codes already pasted on
-// client sites; next.config.ts rewrites legacy hashed URLs to the stable route.
+// The generated public/widget.js is served directly by the CDN. next.config.ts
+// rewrites the stable API URL and historical hashed aliases to this file.
+// We do not emit hashed copies: old pasted URLs must survive every deploy.
 
 /**
  * Loads `.css?inline` imports as plain strings so the embed script can inject
@@ -60,7 +59,7 @@ const buildOptions = {
 async function writeStableManifest() {
   // Keep the historical manifest useful without publishing a build hash that
   // becomes stale after the next deployment. Consumers resolve the stable
-  // route, which is covered by the same beforeFiles aliases as old snippets.
+  // file, which is covered by the same beforeFiles aliases as old snippets.
   await fs.writeFile(
     manifestPath,
     `${JSON.stringify({ file: 'widget.js' })}\n`,
